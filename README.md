@@ -1,5 +1,8 @@
 # GTA V Patchs Editor Tools – Blender Addon
 
+##Discord
+*https://discord.gg/Cwvcm9bJ
+
 ## Overview
 
 This Blender addon provides a complete workflow for importing, editing, and creating core GTA V navigation and scenario-related files directly inside Blender. It is designed for modders, map creators, and FiveM developers who want full control over AI navigation, traffic paths, scenarios, and train systems.
