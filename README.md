@@ -1,7 +1,7 @@
 # GTA V Patchs Editor Tools – Blender Addon
 
 ##Discord
-*https://discord.gg/Cwvcm9bJ
+* https://discord.gg/Cwvcm9bJ
 
 ## Overview
 
