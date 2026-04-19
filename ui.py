@@ -4,6 +4,21 @@ ui.py — N-Panel GTA V Pathing Editor with complete YND panel
 """
 import bpy
 from bpy.types import Panel, UIList
+from .operators_ynv import _read_selected_face_flags
+
+
+def update_ynv_flags():
+    """Timer function to auto-update YNV selected face flags."""
+    try:
+        if bpy.context.scene.gta5_pathing.active_module == "YNV":
+            props = bpy.context.scene.gta5_pathing.ynv
+            if (bpy.context.active_object and
+                bpy.context.active_object.get("ynv_type") == "poly_mesh" and
+                bpy.context.active_object.mode == "EDIT"):
+                _read_selected_face_flags(bpy.context, props)
+    except Exception:
+        pass  # Ignore errors in timer
+    return 0.2  # Run every 0.2 seconds
 
 
 # ── UI LISTS ──────────────────────────────────────────────────────────────────
@@ -459,8 +474,13 @@ def register():
         try: bpy.utils.unregister_class(cls)
         except Exception: pass
         bpy.utils.register_class(cls)
+    # Start timer for auto-updating YNV flags
+    bpy.app.timers.register(update_ynv_flags)
 
 def unregister():
+    # Stop timer
+    if bpy.app.timers.is_registered(update_ynv_flags):
+        bpy.app.timers.unregister(update_ynv_flags)
     for cls in reversed(_classes):
         try: bpy.utils.unregister_class(cls)
         except Exception: pass

@@ -180,6 +180,44 @@ def _link_obj(obj, col):
     col.objects.link(obj)
 
 
+def _find_node_by_area_id(nodes, area_id, node_id):
+    for i, n in enumerate(nodes):
+        if n.area_id == area_id and n.node_id == node_id:
+            return i, n
+    return None, None
+
+
+def _build_ynd_link_objects(props, col):
+    root_links = bpy.data.objects.new("YND_Links", None)
+    root_links.empty_display_type = "PLAIN_AXES"
+    root_links.empty_display_size = 0.1
+    root_links["ynd_type"] = "links_root"
+    _link_obj(root_links, col)
+
+    for src_index, node in enumerate(props.nodes):
+        start = node.position
+        for link_index, lk in enumerate(node.links):
+            target_index, target_node = _find_node_by_area_id(props.nodes, lk.to_area_id, lk.to_node_id)
+            if target_node is None:
+                continue
+            curve_data = bpy.data.curves.new(f"YND_LinkCurve_{src_index}_{link_index}", type="CURVE")
+            curve_data.dimensions = "3D"
+            curve_data.resolution_u = 2
+            curve_data.bevel_depth = 0.02
+            curve_data.bevel_resolution = 0
+            spline = curve_data.splines.new("POLY")
+            spline.points.add(1)
+            spline.points[0].co = (*start, 1.0)
+            spline.points[1].co = (*target_node.position, 1.0)
+            obj = bpy.data.objects.new(f"YND_Link_{node.area_id}_{node.node_id}_{lk.to_area_id}_{lk.to_node_id}", curve_data)
+            obj["ynd_type"] = "link"
+            obj["link_from"] = src_index
+            obj["link_to"] = target_index
+            obj.parent = root_links
+            _link_obj(obj, col)
+    return root_links
+
+
 def _build_ynd_objects(props, col):
     root_obj = bpy.data.objects.new("YND_Root", None)
     root_obj.empty_display_type = "PLAIN_AXES"
@@ -209,6 +247,9 @@ def _build_ynd_objects(props, col):
         obj["is_junction"]   = _node_is_junction(node)
         obj.parent = root_obj
         _link_obj(obj, col)
+
+    links_root = _build_ynd_link_objects(props, col)
+    links_root.parent = root_obj
     return root_obj
 
 

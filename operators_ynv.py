@@ -88,7 +88,7 @@ def _mat_key(b0, b1, b2, b3):
 def _mat_name(b0, b1, b2, b3):
     """Complete material name with readable description, max 63 chars."""
     label = "_".join(_flag_label_parts(b0, b1, b2, b3))
-    base  = f"YNV_{b0:03d}_{b1:03d}_{b2:03d}_{b3:03d}_{label}"
+    base  = f"YNV_{label}"
     return base[:63]   # Blender limite les noms à 63 chars
 
 
@@ -250,8 +250,9 @@ def _build_navmesh_obj(polygons_data, area_id):
     vert_map    = {}
     verts_list  = []
     faces_list  = []
-    # Pour chaque face : (b0, b1, b2, b3, b4, b5) pour pouvoir retrouver les bytes complets
+    # For each face: keep flags and raw edge lines so export can preserve the original structure
     face_flags  = []
+    face_edges  = []
 
     for poly in polygons_data:
         b0, b1, b2, b3, b4, b5 = _parse_flags_str(poly["flags"])
@@ -265,6 +266,7 @@ def _build_navmesh_obj(polygons_data, area_id):
         if len(face_indices) >= 3:
             faces_list.append(face_indices)
             face_flags.append((b0, b1, b2, b3, b4, b5))
+            face_edges.append(poly.get("edges", []))
 
     mesh = bpy.data.meshes.new(f"YNV_{area_id}_PolyMesh")
     mesh.from_pydata(verts_list, [], faces_list)
@@ -291,11 +293,11 @@ def _build_navmesh_obj(polygons_data, area_id):
     obj = bpy.data.objects.new(f"YNV_{area_id}_PolyMesh", mesh)
     obj["ynv_type"]    = "poly_mesh"
     obj["ynv_area_id"] = area_id
-    # Stocker les bytes 4-5 par face dans un custom prop JSON light
-    # (liste de paires sérialisée pour une récupération rapide)
+    # Store bytes 4-5 and edge data for a faithful XML rebuild.
     import json
     b45_data = [(ff[4], ff[5]) for ff in face_flags]
     obj["ynv_bytes45"] = json.dumps(b45_data)
+    obj["ynv_edge_lines"] = json.dumps(face_edges)
     return obj
 
 
@@ -349,19 +351,18 @@ def _build_ynv_xml(context, props):
     polys_el   = ET.SubElement(root, "Polygons")
     poly_obj   = next((o for o in context.scene.objects if o.get("ynv_type") == "poly_mesh"), None)
     if poly_obj and poly_obj.type == "MESH":
-        mesh     = poly_obj.data
+        mesh      = poly_obj.data
         import json
-        b45_data = json.loads(poly_obj.get("ynv_bytes45", "[]"))
+        b45_data    = json.loads(poly_obj.get("ynv_bytes45", "[]"))
+        edge_lines  = json.loads(poly_obj.get("ynv_edge_lines", "[]"))
 
         for i, poly in enumerate(mesh.polygons):
             mi  = poly.material_index
             mat = mesh.materials[mi] if mi < len(mesh.materials) else None
-            # Lire b0-b3 depuis les custom props du matériau
             if mat and "ynv_b0" in mat:
                 b0, b1, b2, b3 = mat["ynv_b0"], mat["ynv_b1"], mat["ynv_b2"], mat["ynv_b3"]
             else:
                 b0, b1, b2, b3 = 0, 0, 0, 0
-            # Récupérer b4, b5 depuis la custom prop de l'objet
             if i < len(b45_data):
                 b4, b5 = b45_data[i]
             else:
@@ -379,8 +380,14 @@ def _build_ynv_xml(context, props):
             verts_el.text = "\n" + "\n".join(vert_lines) + "\n   "
 
             edges_el  = ET.SubElement(item, "Edges")
-            elines    = [f"    {props.area_id}:0, {props.area_id}:0" for _ in poly.vertices]
-            edges_el.text = "\n" + "\n".join(elines) + "\n   "
+            if i < len(edge_lines) and edge_lines[i]:
+                edges_el.text = "\n" + "\n".join(edge_lines[i]) + "\n   "
+            else:
+                elines = []
+                verts = list(poly.vertices)
+                for a, b in zip(verts, verts[1:] + verts[:1]):
+                    elines.append(f"    {props.area_id}:{a}, {props.area_id}:{b}")
+                edges_el.text = "\n" + "\n".join(elines) + "\n   "
 
     portals_el = ET.SubElement(root, "Portals")
     for portal in props.portals:
