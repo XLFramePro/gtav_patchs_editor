@@ -262,7 +262,7 @@ def _build_ynd_xml(context, props):
 
 class YND_OT_Import(Operator):
     """Importe un fichier PathNodes YND XML"""
-    bl_idname = "gta5_ynd.import_xml"; bl_label = "Importer YND XML"
+    bl_idname = "gta5_ynd.import_xml"; bl_label = "Import YND XML"
     bl_options = {"REGISTER", "UNDO"}
     filepath:   StringProperty(subtype="FILE_PATH")
     filter_glob:StringProperty(default="*.xml;*.ynd.xml", options={"HIDDEN"})
@@ -284,7 +284,7 @@ class YND_OT_Import(Operator):
 
 class YND_OT_Export(Operator):
     """Exporte les PathNodes en YND XML"""
-    bl_idname = "gta5_ynd.export_xml"; bl_label = "Exporter YND XML"
+    bl_idname = "gta5_ynd.export_xml"; bl_label = "Export YND XML"
     bl_options = {"REGISTER"}
     filepath:   StringProperty(subtype="FILE_PATH")
     filter_glob:StringProperty(default="*.xml", options={"HIDDEN"})
@@ -306,7 +306,7 @@ class YND_OT_Export(Operator):
 
 class YND_OT_AddVehicleNode(Operator):
     """Ajoute un noeud véhicule au curseur 3D"""
-    bl_idname = "gta5_ynd.add_vehicle_node"; bl_label = "Ajouter Noeud Véhicule"
+    bl_idname = "gta5_ynd.add_vehicle_node"; bl_label = "Add Vehicle Node"
     bl_options = {"REGISTER", "UNDO"}
     def execute(self, context):
         props = context.scene.gta5_pathing.ynd
@@ -335,7 +335,7 @@ class YND_OT_AddVehicleNode(Operator):
 
 class YND_OT_AddPedNode(Operator):
     """Ajoute un noeud piéton au curseur 3D"""
-    bl_idname = "gta5_ynd.add_ped_node"; bl_label = "Ajouter Noeud Piéton"
+    bl_idname = "gta5_ynd.add_ped_node"; bl_label = "Add Pedestrian Node"
     bl_options = {"REGISTER", "UNDO"}
     def execute(self, context):
         props = context.scene.gta5_pathing.ynd
@@ -364,7 +364,7 @@ class YND_OT_AddPedNode(Operator):
 
 class YND_OT_RemoveNode(Operator):
     """Supprime le noeud actif + tous ses liens entrants dans les autres noeuds"""
-    bl_idname = "gta5_ynd.remove_node"; bl_label = "Supprimer Noeud"
+    bl_idname = "gta5_ynd.remove_node"; bl_label = "Remove Node"
     bl_options = {"REGISTER", "UNDO"}
     @classmethod
     def poll(cls, context):
@@ -391,7 +391,7 @@ class YND_OT_RemoveNode(Operator):
 
 class YND_OT_AddLink(Operator):
     """Ajoute un lien sortant au noeud actif"""
-    bl_idname = "gta5_ynd.add_link"; bl_label = "Ajouter Lien"
+    bl_idname = "gta5_ynd.add_link"; bl_label = "Add Link"
     bl_options = {"REGISTER", "UNDO"}
     @classmethod
     def poll(cls, context):
@@ -410,7 +410,7 @@ class YND_OT_AddLink(Operator):
 
 class YND_OT_RemoveLink(Operator):
     """Supprime le lien actif du noeud"""
-    bl_idname = "gta5_ynd.remove_link"; bl_label = "Supprimer Lien"
+    bl_idname = "gta5_ynd.remove_link"; bl_label = "Remove Link"
     bl_options = {"REGISTER", "UNDO"}
     @classmethod
     def poll(cls, context):
@@ -427,7 +427,7 @@ class YND_OT_RemoveLink(Operator):
 
 class YND_OT_RemoveAllLinks(Operator):
     """Supprime TOUS les liens du noeud actif"""
-    bl_idname = "gta5_ynd.remove_all_links"; bl_label = "Supprimer Tous les Liens"
+    bl_idname = "gta5_ynd.remove_all_links"; bl_label = "Remove All Links"
     bl_options = {"REGISTER", "UNDO"}
     @classmethod
     def poll(cls, context):
@@ -446,7 +446,7 @@ class YND_OT_RemoveAllLinks(Operator):
 
 class YND_OT_LinkTwoNodes(Operator):
     """Crée un lien du noeud actif vers un noeud cible"""
-    bl_idname = "gta5_ynd.link_two_nodes"; bl_label = "Lier vers Noeud Cible"
+    bl_idname = "gta5_ynd.link_two_nodes"; bl_label = "Link to Target Node"
     bl_options = {"REGISTER", "UNDO"}
     target_node_id: IntProperty(name="Node ID cible", default=0, min=0)
     target_area_id: IntProperty(name="Area ID cible", default=400, min=0)
@@ -480,7 +480,7 @@ class YND_OT_LinkTwoNodes(Operator):
 
 class YND_OT_SyncFromObjects(Operator):
     """Synchronise les positions depuis les empties Blender"""
-    bl_idname = "gta5_ynd.sync_from_objects"; bl_label = "Sync depuis Objets"
+    bl_idname = "gta5_ynd.sync_from_objects"; bl_label = "Sync from Objects"
     bl_options = {"REGISTER", "UNDO"}
     def execute(self, context):
         props = context.scene.gta5_pathing.ynd

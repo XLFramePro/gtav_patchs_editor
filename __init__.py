@@ -2,14 +2,14 @@
 ================================================================================
 GTA V Pathing Editor — Blender 4.5 Addon
 ================================================================================
-Supporte les formats :
-  • YNV  — NavMesh (polygones piétons/véhicules, portails, points de nav)
-  • YND  — NodeDictionary (noeuds de chemin véhicules/piétons, liens)
+Supports formats:
+  • YNV  — NavMesh (pedestrian/vehicle polygons, portals, nav points)
+  • YND  — NodeDictionary (vehicle/pedestrian path nodes, links)
   • YMT  — ScenarioPointRegion (spawn points, chaining graph, clusters)
-  • TRAINS.DAT — Pistes de train (points 3D avec flags)
+  • TRAINS.DAT — Train tracks (3D points with flags)
 
-Chaque format a ses propres propriétés, opérateurs, import/export XML/.dat
-et visualisation GPU dans le viewport 3D.
+Each format has its own properties, operators, XML/.dat import/export
+and GPU visualization in the 3D viewport.
 ================================================================================
 """
 
@@ -19,7 +19,7 @@ bl_info = {
     "version":     (1, 0, 0),
     "blender":     (4, 5, 0),
     "location":    "View3D > N-Panel > GTA5 Paths",
-    "description": "Éditeur complet YNV/YND/YMT/Trains pour GTA V",
+    "description": "Complete YNV/YND/YMT/Trains editor for GTA V",
     "category":    "Import-Export",
 }
 
@@ -47,15 +47,15 @@ _modules = [
 
 
 def _start_click_handler():
-    """Lance le modal de clic-sélection s'il n'est pas déjà actif."""
+    """Launch the click-select modal if not already active."""
     import bpy
-    # Vérifier si déjà actif
+    # Check if already active
     wm = bpy.context.window_manager
     if wm and hasattr(wm, "operators"):
         for op in wm.operators:
             if op.bl_idname == "gta5_ynd.activate_click_select":
                 return
-    # Lancer le modal via le window manager
+    # Launch modal via window manager
     try:
         bpy.ops.gta5_ynd.activate_click_select("INVOKE_DEFAULT")
     except Exception:
@@ -65,16 +65,16 @@ def _start_click_handler():
 def register():
     for mod in _modules:
         mod.register()
-    # Démarrer le handler de clic après un court délai
+    # Start click handler after short delay
     import bpy
     bpy.app.timers.register(_start_click_handler, first_interval=0.5)
-    print("[GTA5 Pathing Editor] Addon enregistré.")
+    print("[GTA5 Pathing Editor] Addon registered.")
 
 
 def unregister():
     for mod in reversed(_modules):
         mod.unregister()
-    print("[GTA5 Pathing Editor] Addon désactivé.")
+    print("[GTA5 Pathing Editor] Addon unregistered.")
 
 
 if __name__ == "__main__":

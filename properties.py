@@ -1,6 +1,6 @@
 """
-properties.py — PropertyGroups complets pour GTA V Pathing Editor.
-Les flags YND sont calqués EXACTEMENT sur la référence fournie (properties.py du ynd folder).
+properties.py — Complete PropertyGroups for GTA V Pathing Editor.
+YND flags are exactly matched to the provided reference (properties.py from ynd folder).
 """
 import bpy
 from bpy.props import (

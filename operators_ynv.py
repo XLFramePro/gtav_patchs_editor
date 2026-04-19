@@ -1,13 +1,13 @@
 """
-operators_ynv.py — NavMesh YNV complet.
+operators_ynv.py — Complete NavMesh YNV.
 
-SYSTÈME DE MATÉRIAUX :
-  - Clé = bytes 0-3 uniquement (bytes 4-5 = densité/audio interne, per-polygon → ignorés pour le matériau)
-  - Nom = "YNV_B{b0:03d}_{b1:03d}_{b2:03d}_{b3:03d}_{NomDescriptif}"
-  - Un seul matériau partagé par combinaison b0/b1/b2/b3 identique
-  - Sélection polygone → lecture flags → affichage dans panneau + bytes 4-5 stockés en custom prop
+MATERIAL SYSTEM:
+  - Key = bytes 0-3 only (bytes 4-5 = density/audio internal, per-polygon → ignored for material)
+  - Name = "YNV_B{b0:03d}_{b1:03d}_{b2:03d}_{b3:03d}_{DescriptiveName}"
+  - Single shared material per b0/b1/b2/b3 combination
+  - Polygon selection → read flags → display in panel + bytes 4-5 stored in custom prop
 
-COLORS (priorité décroissante) :
+COLORS (decreasing priority):
   Water > Underground > Interior > Isolated > TrainTrack > Shallow
   > Pavement+Cover > Road+Cover > Pavement > Road > Cover-only > Spawn > Default
 """
@@ -39,7 +39,7 @@ FLAG_PRESETS = {
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _flag_label_parts(b0, b1, b2, b3):
-    """Retourne une liste de strings décrivant les flags actifs."""
+    """Returns a list of strings describing active flags."""
     parts = []
     if b0 & 128: parts.append("Water")
     if b0 & 64:  parts.append("TooSteep")
@@ -64,7 +64,7 @@ def _flag_label_parts(b0, b1, b2, b3):
 
 
 def _flag_color(b0, b1, b2, b3):
-    """Retourne RGBA (0-1) selon priorité de surface."""
+    """Returns RGBA (0-1) according to surface priority."""
     if b0 & 128:            return (0.05, 0.15, 0.85, 0.85)   # Water — bleu profond
     if b0 & 8:              return (0.15, 0.45, 0.15, 0.85)   # Underground — vert foncé
     if b1 & 32:             return (0.85, 0.45, 0.10, 0.85)   # Interior — orange
@@ -81,32 +81,32 @@ def _flag_color(b0, b1, b2, b3):
 
 
 def _mat_key(b0, b1, b2, b3):
-    """Clé unique d'un matériau (bytes 0-3)."""
+    """Unique key for a material (bytes 0-3)."""
     return f"YNV_{b0:03d}_{b1:03d}_{b2:03d}_{b3:03d}"
 
 
 def _mat_name(b0, b1, b2, b3):
-    """Nom complet du matériau avec description lisible, max 63 chars."""
+    """Complete material name with readable description, max 63 chars."""
     label = "_".join(_flag_label_parts(b0, b1, b2, b3))
     base  = f"YNV_{b0:03d}_{b1:03d}_{b2:03d}_{b3:03d}_{label}"
     return base[:63]   # Blender limite les noms à 63 chars
 
 
 def _get_or_create_material(b0, b1, b2, b3):
-    """Retourne (sans créer de doublon) le matériau pour ces flags b0-b3."""
+    """Returns (without duplicating) the material for these b0-b3 flags."""
     key  = _mat_key(b0, b1, b2, b3)
     name = _mat_name(b0, b1, b2, b3)
 
-    # Chercher un matériau existant dont le nom commence par la clé
+    # Look for existing material with name starting with key
     mat = bpy.data.materials.get(name)
     if mat is None:
-        # Chercher par préfixe au cas où le nom aurait été tronqué
+        # Look by prefix in case name was truncated
         mat = next((m for m in bpy.data.materials if m.name.startswith(key)), None)
 
     if mat is not None:
         return mat
 
-    # Créer le matériau
+    # Create the material
     mat = bpy.data.materials.new(name)
     mat.use_nodes = True
     nodes = mat.node_tree.nodes
@@ -137,7 +137,7 @@ def _get_or_create_material(b0, b1, b2, b3):
 
 
 def _parse_flags_str(flags_str):
-    """Convertit '0 128 2 0 161 164' → (b0, b1, b2, b3, b4, b5)."""
+    """Convert '0 128 2 0 161 164' → (b0, b1, b2, b3, b4, b5)."""
     try:
         parts = [int(x) for x in flags_str.split()]
         while len(parts) < 6:
@@ -148,7 +148,7 @@ def _parse_flags_str(flags_str):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  PARSE XML → données python
+#  PARSE XML → python data
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _parse_vertex_line(line):
@@ -165,7 +165,7 @@ def _parse_ynv_xml(filepath, props):
         return False, str(e), []
     root = tree.getroot()
     if root.tag != "NavMesh":
-        return False, f"Racine attendue NavMesh, trouvée {root.tag}", []
+        return False, f"Expected NavMesh root, found {root.tag}", []
 
     cf = root.find("ContentFlags")
     props.content_flags = (cf.text or "").strip() if cf is not None else "Polygons, Portals"
@@ -465,8 +465,8 @@ def _read_selected_face_flags(context, props):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class YNV_OT_Import(Operator):
-    """Importe un fichier navmesh YNV XML dans Blender"""
-    bl_idname  = "gta5_ynv.import_xml"; bl_label = "Importer YNV XML"
+    """Import a navmesh YNV XML file into Blender"""
+    bl_idname  = "gta5_ynv.import_xml"; bl_label = "Import YNV XML"
     bl_options = {"REGISTER", "UNDO"}
     filepath:   StringProperty(subtype="FILE_PATH")
     filter_glob:StringProperty(default="*.xml;*.ynv.xml", options={"HIDDEN"})
@@ -495,8 +495,8 @@ class YNV_OT_Import(Operator):
 
 
 class YNV_OT_Export(Operator):
-    """Exporte la navmesh en YNV XML"""
-    bl_idname  = "gta5_ynv.export_xml"; bl_label = "Exporter YNV XML"
+    """Export navmesh to YNV XML"""
+    bl_idname  = "gta5_ynv.export_xml"; bl_label = "Export YNV XML"
     bl_options = {"REGISTER"}
     filepath:   StringProperty(subtype="FILE_PATH")
     filter_glob:StringProperty(default="*.xml", options={"HIDDEN"})

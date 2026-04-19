@@ -1,28 +1,28 @@
 """
-draw_handler.py — Visualisation GPU YND/YNV/YMT/Trains.
+draw_handler.py — GPU visualization YND/YNV/YMT/Trains.
 
-RENDU YND (correspondant à l'image CodeWalker) :
-  ● Noeuds blancs (carrés = véhicule, petits ronds = piéton)
-  ● Noeud sélectionné = jaune
+YND RENDERING (matching CodeWalker image):
+  ● White nodes (squares = vehicle, small circles = pedestrian)
+  ● Selected node = yellow
 
-  OVERLAYS COLORÉS LE LONG DES LIENS (inspiré CodeWalker) :
-    ■ VERT  = voies forward (largeur ∝ forward_lanes, min 1)
-    ■ ROUGE = voies back    (largeur ∝ back_lanes)
+  COLORED OVERLAYS along links (inspired by CodeWalker):
+    ■ GREEN = forward lanes (width ∝ forward_lanes, min 1)
+    ■ RED = back lanes
 
-  LIGNES DE LIENS :
-    ─ BLEU    = lien véhicule standard
-    ─ CYAN    = lien shortcut / slip lane
-    ─ ROUGE   = lien piéton / disabled
-    ─ MAGENTA = lien parking special
-    ─ MARRON  = lien freeway
-    ─ ORANGE  = lien dead-end
-    ─ JAUNE   = lien vitesse lente (Speed=SLOW)
+  LINK LINES:
+    ─ BLUE = standard vehicle link
+    ─ CYAN = shortcut / slip lane
+    ─ RED = pedestrian / disabled
+    ─ MAGENTA = parking special
+    ─ BROWN = freeway
+    ─ ORANGE = dead-end
+    ─ YELLOW = slow speed (Speed=SLOW)
 
-  FLÈCHES DE DIRECTION le long de chaque lien
+  DIRECTION ARROWS along each link
 
-  □ VIOLET = junction bounds
+  □ PURPLE = junction bounds
 
-CLIC SUR NOEUD → sélection automatique dans le panneau
+Click on node → automatic selection in panel
 """
 
 import bpy

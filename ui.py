@@ -1,6 +1,6 @@
 """
-ui.py — N-Panel GTA V Pathing Editor avec panneau YND complet
-(flags structurés NodeFlags0-5, LinkFlags0-2, design référence ynd.rar).
+ui.py — N-Panel GTA V Pathing Editor with complete YND panel
+(flags structured NodeFlags0-5, LinkFlags0-2, reference design ynd.rar).
 """
 import bpy
 from bpy.types import Panel, UIList
@@ -71,7 +71,7 @@ class GTA5_PT_PathingEditor(Panel):
     def draw(self, context):
         layout = self.layout
         if not hasattr(context.scene, "gta5_pathing"):
-            layout.label(text="Addon non chargé.", icon="ERROR"); return
+            layout.label(text="Addon not loaded.", icon="ERROR"); return
         gp = context.scene.gta5_pathing
         row = layout.row(align=True)
         row.prop(gp, "active_module", expand=True)
@@ -92,16 +92,16 @@ def _draw_ynv(layout, context, props):
     box = layout.box()
     box.label(text=f"NavMesh — Area {props.area_id}", icon="MOD_FLUID")
     col = box.column(align=True)
-    col.label(text=f"Polygones : {props.stat_polygons}")
-    col.label(text=f"Portails  : {props.stat_portals}")
-    col.label(text=f"Nav Pts   : {props.stat_navpoints}")
+    col.label(text=f"Polygons : {props.stat_polygons}")
+    col.label(text=f"Portals  : {props.stat_portals}")
+    col.label(text=f"Nav Pts  : {props.stat_navpoints}")
     row = box.row(align=True); row.prop(props, "area_id")
     row2 = box.row(align=True); row2.prop(props, "bb_min", text="BB Min")
     row3 = box.row(align=True); row3.prop(props, "bb_max", text="BB Max")
     box.operator("gta5_ynv.compute_bbox", text="Recalculer BB", icon="CUBE")
 
     box_v = layout.box()
-    box_v.label(text="Affichage", icon="HIDE_OFF")
+    box_v.label(text="Display", icon="HIDE_OFF")
     row = box_v.row(align=True)
     row.prop(props, "show_polygons", toggle=True)
     row.prop(props, "show_portals",  toggle=True)
@@ -109,17 +109,17 @@ def _draw_ynv(layout, context, props):
 
     layout.separator(factor=0.3)
     box_f = layout.box()
-    box_f.label(text="Éditeur Flags Polygones", icon="TOOL_SETTINGS")
+    box_f.label(text="Polygon Flags Editor", icon="TOOL_SETTINGS")
     row = box_f.row(align=True)
-    row.prop(props, "flag_preset", text="Préset")
+    row.prop(props, "flag_preset", text="Preset")
     row2 = box_f.row(align=True)
-    row2.operator("gta5_ynv.apply_flags_preset", text="Appliquer Préset", icon="CHECKMARK")
-    row2.operator("gta5_ynv.add_polygon",        text="+ Polygone",       icon="ADD")
+    row2.operator("gta5_ynv.apply_flags_preset", text="Apply Preset", icon="CHECKMARK")
+    row2.operator("gta5_ynv.add_polygon",        text="+ Polygon",       icon="ADD")
     box_f.separator(factor=0.2)
-    box_f.label(text="Flags Custom (sélectionner face en Edit Mode):")
+    box_f.label(text="Custom Flags (select face in Edit Mode):")
     row_rd = box_f.row(align=True)
-    row_rd.operator("gta5_ynv.read_selected_flags", text="Lire sélection",     icon="EYEDROPPER")
-    row_rd.operator("gta5_ynv.apply_custom_flags",  text="Appliquer Custom",   icon="CHECKMARK")
+    row_rd.operator("gta5_ynv.read_selected_flags", text="Read Selection",     icon="EYEDROPPER")
+    row_rd.operator("gta5_ynv.apply_custom_flags",  text="Apply Custom",   icon="CHECKMARK")
 
     pf = props.selected_poly_flags
     b0 = box_f.box(); b0.label(text="Flags1 — Surface (Byte 0)")
@@ -132,7 +132,7 @@ def _draw_ynv(layout, context, props):
     for a in ["audio_prop1","audio_prop2","audio_prop3","unused_f2_3","near_car_node","is_interior","is_isolated","unused_f2_7"]:
         g1.prop(pf, a)
 
-    b2 = box_f.box(); b2.label(text="Flags3 — Comportement (Byte 2)")
+    b2 = box_f.box(); b2.label(text="Flags3 — Behavior (Byte 2)")
     g2 = b2.column_flow(columns=2, align=True)
     for a in ["can_spawn","is_road","along_edge","is_train_track","is_shallow","ped_density1","ped_density2","ped_density3"]:
         g2.prop(pf, a)
@@ -142,7 +142,7 @@ def _draw_ynv(layout, context, props):
     for a in ["cover_south","cover_south2","cover_east","cover_north","cover_north2","cover_north3","cover_west","cover_south3"]:
         g3.prop(pf, a)
 
-    b45 = box_f.box(); b45.label(text="Bytes 4-5 (densité/audio interne)")
+    b45 = box_f.box(); b45.label(text="Bytes 4-5 (internal density/audio)")
     r45 = b45.row(align=True); r45.prop(pf, "byte4"); r45.prop(pf, "byte5")
 
     layout.separator(factor=0.2)
@@ -152,7 +152,7 @@ def _draw_ynv(layout, context, props):
     box_mc.operator("gta5_ynv.split_mesh", text="Split Mesh", icon="MOD_EXPLODE")
 
     layout.separator(factor=0.2)
-    box_p = layout.box(); box_p.label(text=f"Portails ({props.stat_portals})", icon="OBJECT_DATA")
+    box_p = layout.box(); box_p.label(text=f"Portals ({props.stat_portals})", icon="OBJECT_DATA")
     row2 = box_p.row()
     row2.template_list("GTA5_UL_YNV_Portals","",props,"portals",props,"portal_index",rows=3)
     col = row2.column(align=True)
@@ -160,7 +160,7 @@ def _draw_ynv(layout, context, props):
     col.operator("gta5_ynv.remove_portal", text="",icon="REMOVE")
     idx_p = props.portal_index
     if 0 <= idx_p < len(props.portals):
-        p = props.portals[idx_p]; sub = box_p.box(); sub.label(text=f"Portail {idx_p}")
+        p = props.portals[idx_p]; sub = box_p.box(); sub.label(text=f"Portal {idx_p}")
         sub.prop(p,"portal_type"); sub.prop(p,"angle"); sub.prop(p,"poly_from"); sub.prop(p,"poly_to")
         sub.prop(p,"pos_from"); sub.prop(p,"pos_to")
 
@@ -175,7 +175,7 @@ def _draw_ynv(layout, context, props):
     if 0 <= idx_n < len(props.nav_points):
         np = props.nav_points[idx_n]; sub = box_n.box(); sub.label(text=f"Nav Point {idx_n}")
         sub.prop(np,"point_type"); sub.prop(np,"angle"); sub.prop(np,"position")
-    box_n.operator("gta5_ynv.sync_from_objects", text="Sync depuis Empties", icon="FILE_REFRESH")
+    box_n.operator("gta5_ynv.sync_from_objects", text="Sync from Empties", icon="FILE_REFRESH")
 
 
 # ── YND ──────────────────────────────────────────────────────────────────────
@@ -185,37 +185,37 @@ def _draw_ynd(layout, context, props):
     row.operator("gta5_ynd.import_xml", text="📂 Import YND", icon="IMPORT")
     row.operator("gta5_ynd.export_xml", text="💾 Export YND", icon="EXPORT")
 
-    # Bouton clic-sélection + Stats
+    # Click-select button + Stats
     row_click = layout.row(align=True)
     row_click.operator("gta5_ynd.activate_click_select",
-                       text="🖱 Activer Clic-Sélection Noeud",
+                       text="🖱 Activate Node Click-Select",
                        icon="CURSOR")
 
     box = layout.box()
     box.label(text=f"PathNodes — Area {props.area_id}", icon="EMPTY_ARROWS")
     col = box.column(align=True)
     col.label(text=f"Total     : {props.stat_nodes}")
-    col.label(text=f"Véhicules : {props.stat_vehicle}  ●Blanc  ■Vert/Rouge")
-    col.label(text=f"Piétons   : {props.stat_ped}   ●Gris   ──Rouge")
-    col.label(text=f"Carrefours: {props.stat_junctions}  □Violet")
+    col.label(text=f"Vehicles : {props.stat_vehicle}  ●White  ■Green/Red")
+    col.label(text=f"Pedestrians   : {props.stat_ped}   ●Grey   ──Red")
+    col.label(text=f"Junctions: {props.stat_junctions}  □Purple")
 
-    # Affichage
-    box2 = layout.box(); box2.label(text="Affichage", icon="HIDE_OFF")
+    # Display
+    box2 = layout.box(); box2.label(text="Display", icon="HIDE_OFF")
     row = box2.row(align=True)
     row.prop(props,"show_vehicle",  toggle=True)
     row.prop(props,"show_ped",      toggle=True)
     row.prop(props,"show_links",    toggle=True)
     row.prop(props,"show_junctions",toggle=True)
     box2.prop(props,"filter_street")
-    box2.operator("gta5_ynd.sync_from_objects", text="Sync depuis Empties", icon="FILE_REFRESH")
+    box2.operator("gta5_ynd.sync_from_objects", text="Sync from Empties", icon="FILE_REFRESH")
 
     layout.separator(factor=0.2)
 
-    # ── LISTE DES NOEUDS ─────────────────────────────────────────────────────
-    box_n = layout.box(); box_n.label(text="Noeuds", icon="EMPTY_ARROWS")
+    # ── NODES LIST ─────────────────────────────────────────────────────
+    box_n = layout.box(); box_n.label(text="Nodes", icon="EMPTY_ARROWS")
     row_add = box_n.row(align=True)
-    row_add.operator("gta5_ynd.add_vehicle_node", text="+ Véhicule", icon="AUTO")
-    row_add.operator("gta5_ynd.add_ped_node",     text="+ Piéton",   icon="USER")
+    row_add.operator("gta5_ynd.add_vehicle_node", text="+ Vehicle", icon="AUTO")
+    row_add.operator("gta5_ynd.add_ped_node",     text="+ Pedestrian",   icon="USER")
 
     row2 = box_n.row()
     row2.template_list("GTA5_UL_YND_Nodes","",props,"nodes",props,"node_index",rows=6)
@@ -229,19 +229,19 @@ def _draw_ynd(layout, context, props):
         is_ped = node.flags1.special_type in PED_SPECIAL_TYPES
 
         sub = box_n.box()
-        sub.label(text=f"{'Piéton' if is_ped else 'Véhicule'} — {node.area_id}:{node.node_id}")
+        sub.label(text=f"{'Pedestrian' if is_ped else 'Vehicle'} — {node.area_id}:{node.node_id}")
         row_id = sub.row(align=True)
         row_id.prop(node, "area_id"); row_id.prop(node, "node_id")
         sub.prop(node, "street_name")
         sub.prop(node, "position")
 
-        # ── FLAGS DÉTAILLÉS (comme la référence) ─────────────────────────────
+        # ── DETAILED FLAGS (like reference) ─────────────────────────────
         sub.separator(factor=0.2)
-        sub.label(text="Flags Noeud :", icon="BOOKMARKS")
+        sub.label(text="Node Flags :", icon="BOOKMARKS")
 
-        # Flags1 — Special Type en premier (le plus important)
+        # Flags1 — Special Type first (most important)
         box_f1 = sub.box()
-        box_f1.label(text="Flags 1 — Type spécial")
+        box_f1.label(text="Flags 1 — Special Type")
         box_f1.prop(node.flags1, "special_type")
         grid1 = box_f1.column_flow(columns=2, align=True)
         grid1.prop(node.flags1, "slip_lane")
@@ -260,7 +260,7 @@ def _draw_ynd(layout, context, props):
         for a in ["no_gps","unused_2","junction","unused_8","disabled_1","water_boats","freeway","disabled_2"]:
             grid2.prop(node.flags2, a)
 
-        # Flags3-5 compacts
+        # Flags3-5 compact
         box_f35 = sub.box(); box_f35.label(text="Flags 3-4-5")
         row35 = box_f35.row(align=True)
         row35.prop(node.flags3, "tunnel")
@@ -273,7 +273,7 @@ def _draw_ynd(layout, context, props):
         row_5.prop(node.flags5, "speed")
         row_5.prop(node.flags5, "has_junction_heightmap")
 
-        # Junction heightmap si activé
+        # Junction heightmap if enabled
         if node.flags2.junction and node.flags5.has_junction_heightmap:
             box_jct = sub.box(); box_jct.label(text="Junction", icon="GRID")
             jct = node.junction
@@ -283,17 +283,17 @@ def _draw_ynd(layout, context, props):
             row_j2.prop(jct,"pos_x"); row_j2.prop(jct,"pos_y")
             row_j3 = box_jct.row(align=True)
             row_j3.prop(jct,"size_x"); row_j3.prop(jct,"size_y")
-            box_jct.label(text="Pour générer le heightmap : utiliser CodeWalker", icon="ERROR")
+            box_jct.label(text="To generate heightmap: use CodeWalker", icon="ERROR")
 
-        # ── LIENS DU NOEUD ────────────────────────────────────────────────────
+        # ── NODE LINKS ───────────────────────────────────────────────────
         sub.separator(factor=0.2)
         sub2 = sub.box()
-        sub2.label(text=f"Liens ({len(node.links)})", icon="LINKED")
+        sub2.label(text=f"Links ({len(node.links)})", icon="LINKED")
 
         row_lk_add = sub2.row(align=True)
-        row_lk_add.operator("gta5_ynd.add_link",         text="+ Lien",        icon="ADD")
-        row_lk_add.operator("gta5_ynd.link_two_nodes",   text="Lier vers...",  icon="LINKED")
-        row_lk_add.operator("gta5_ynd.remove_all_links", text="🗑 Tout sup.",   icon="TRASH")
+        row_lk_add.operator("gta5_ynd.add_link",         text="+ Link",        icon="ADD")
+        row_lk_add.operator("gta5_ynd.link_two_nodes",   text="Link to...",  icon="LINKED")
+        row_lk_add.operator("gta5_ynd.remove_all_links", text="🗑 Remove All",   icon="TRASH")
 
         row3 = sub2.row()
         row3.template_list("GTA5_UL_YND_Links","",node,"links",node,"link_index",rows=4)
@@ -303,11 +303,11 @@ def _draw_ynd(layout, context, props):
         li = node.link_index
         if 0 <= li < len(node.links):
             lk = node.links[li]
-            sub3 = sub2.box(); sub3.label(text=f"Lien {li} → {lk.to_area_id}:{lk.to_node_id}")
+            sub3.label(text=f"Link {li} → {lk.to_area_id}:{lk.to_node_id}")
 
             row_lk = sub3.row(align=True)
             row_lk.prop(lk, "to_area_id", text="Area"); row_lk.prop(lk, "to_node_id", text="Node")
-            sub3.label(text=f"Longueur : {lk.link_length}")
+            sub3.label(text=f"Length : {lk.link_length}")
 
             # LinkFlags0
             bf0 = sub3.box(); bf0.label(text="Link Flags 0 — GPS")
@@ -328,7 +328,7 @@ def _draw_ynd(layout, context, props):
             gf1.prop(lk.flags1, "offset")
 
             # LinkFlags2
-            bf2 = sub3.box(); bf2.label(text="Link Flags 2 — Voies")
+            bf2 = sub3.box(); bf2.label(text="Link Flags 2 — Lanes")
             gf2 = bf2.column_flow(columns=2, align=True)
             gf2.prop(lk.flags2, "dont_use_for_navigation")
             gf2.prop(lk.flags2, "shortcut")
@@ -344,14 +344,14 @@ def _draw_ymt(layout, context, props):
     row.operator("gta5_ymt.export_xml", text="💾 Export .ymt", icon="EXPORT")
     box = layout.box(); box.label(text=f"Scenarios v{props.version_number}", icon="ARMATURE_DATA")
     col = box.column(align=True)
-    col.label(text=f"Points   : {props.stat_points}"); col.label(text=f"Noeuds   : {props.stat_nodes}")
-    col.label(text=f"Arêtes   : {props.stat_edges}");  col.label(text=f"Chaînes  : {props.stat_chains}")
-    box2 = layout.box(); box2.label(text="Affichage", icon="FILTER")
+    col.label(text=f"Points   : {props.stat_points}"); col.label(text=f"Nodes   : {props.stat_nodes}")
+    col.label(text=f"Edges   : {props.stat_edges}");  col.label(text=f"Chains  : {props.stat_chains}")
+    box2 = layout.box(); box2.label(text="Display", icon="FILTER")
     row = box2.row(align=True)
     row.prop(props,"show_scenario_pts",toggle=True); row.prop(props,"show_chain_nodes",toggle=True); row.prop(props,"show_chain_edges",toggle=True)
-    box2.operator("gta5_ymt.sync_from_objects", text="Sync depuis Empties", icon="FILE_REFRESH")
+    box2.operator("gta5_ymt.sync_from_objects", text="Sync from Empties", icon="FILE_REFRESH")
     layout.separator(factor=0.2)
-    box_sp = layout.box(); box_sp.label(text="Points Scénario", icon="EMPTY_SINGLE_ARROW")
+    box_sp = layout.box(); box_sp.label(text="Scenario Points", icon="EMPTY_SINGLE_ARROW")
     row2 = box_sp.row()
     row2.template_list("GTA5_UL_YMT_ScenarioPoints","",props,"scenario_points",props,"point_index",rows=5)
     col = row2.column(align=True)
@@ -361,11 +361,11 @@ def _draw_ymt(layout, context, props):
     if 0 <= idx < len(props.scenario_points):
         sp = props.scenario_points[idx]; sub = box_sp.box(); sub.label(text=f"Point {idx}")
         sub.prop(sp,"itype"); sub.prop(sp,"flags")
-        row_t = sub.row(align=True); row_t.prop(sp,"time_start",text="Début"); row_t.prop(sp,"time_end",text="Fin")
+        row_t = sub.row(align=True); row_t.prop(sp,"time_start",text="Start"); row_t.prop(sp,"time_end",text="End")
         sub.prop(sp,"model_set_id"); sub.prop(sp,"probability"); sub.prop(sp,"radius"); sub.prop(sp,"position")
     layout.separator(factor=0.2)
-    box_cg = layout.box(); box_cg.label(text="Graphe Chaînage", icon="NODETREE")
-    sub_cn = box_cg.box(); sub_cn.label(text=f"Noeuds ({props.stat_nodes})")
+    box_cg = layout.box(); box_cg.label(text="Chaining Graph", icon="NODETREE")
+    sub_cn = box_cg.box(); sub_cn.label(text=f"Nodes ({props.stat_nodes})")
     row_cn = sub_cn.row()
     row_cn.template_list("GTA5_UL_YMT_ChainingNodes","",props,"chaining_nodes",props,"chain_node_index",rows=3)
     col_cn = row_cn.column(align=True); col_cn.operator("gta5_ymt.add_chaining_node", text="",icon="ADD")
@@ -373,8 +373,8 @@ def _draw_ymt(layout, context, props):
     if 0 <= ci < len(props.chaining_nodes):
         cn = props.chaining_nodes[ci]; csub = sub_cn.box()
         csub.prop(cn,"scenario_type"); csub.prop(cn,"position")
-        sub_cn.operator("gta5_ymt.remove_all_edges_node", text="🗑 Supprimer arêtes", icon="TRASH")
-    sub_ce = box_cg.box(); sub_ce.label(text=f"Arêtes ({props.stat_edges})")
+        sub_cn.operator("gta5_ymt.remove_all_edges_node", text="🗑 Remove Edges", icon="TRASH")
+    sub_ce = box_cg.box(); sub_ce.label(text=f"Edges ({props.stat_edges})")
     row_ce = sub_ce.row()
     row_ce.template_list("GTA5_UL_YMT_ChainingEdges","",props,"chaining_edges",props,"chain_edge_index",rows=3)
     col_ce = row_ce.column(align=True)
@@ -383,7 +383,7 @@ def _draw_ymt(layout, context, props):
     ei = props.chain_edge_index
     if 0 <= ei < len(props.chaining_edges):
         ce = props.chaining_edges[ei]; esub = sub_ce.box()
-        row_e = esub.row(align=True); row_e.prop(ce,"node_from",text="De"); row_e.prop(ce,"node_to",text="À")
+        row_e = esub.row(align=True); row_e.prop(ce,"node_from",text="From"); row_e.prop(ce,"node_to",text="To")
         row_e2 = esub.row(align=True); row_e2.prop(ce,"action"); row_e2.prop(ce,"nav_mode"); row_e2.prop(ce,"nav_speed")
 
 
@@ -393,19 +393,19 @@ def _draw_trains(layout, context, props):
     row = layout.row(align=True)
     row.operator("gta5_trains.import_dat", text="📂 Import .dat", icon="IMPORT")
     row.operator("gta5_trains.export_dat", text="💾 Export .dat", icon="EXPORT")
-    box = layout.box(); box.label(text=f"Piste : {props.track_name}", icon="CURVE_PATH")
+    box = layout.box(); box.label(text=f"Track : {props.track_name}", icon="CURVE_PATH")
     col = box.column(align=True)
-    col.label(text=f"Points     : {props.stat_points}"); col.label(text=f"Aiguillages: {props.stat_junctions}")
-    box2 = layout.box(); box2.label(text="Affichage", icon="HIDE_OFF")
+    col.label(text=f"Points     : {props.stat_points}"); col.label(text=f"Junctions: {props.stat_junctions}")
+    box2 = layout.box(); box2.label(text="Display", icon="HIDE_OFF")
     row = box2.row(align=True); row.prop(props,"show_track",toggle=True); row.prop(props,"show_junctions",toggle=True)
     layout.separator(factor=0.2)
-    box3 = layout.box(); box3.label(text="Ajouter Points", icon="ADD")
+    box3 = layout.box(); box3.label(text="Add Points", icon="ADD")
     row_t = box3.row(align=True)
     op_n = row_t.operator("gta5_trains.add_point", text="+ Normal", icon="ADD"); op_n.flag=0
-    op_j = row_t.operator("gta5_trains.add_point", text="+ Aiguillage", icon="DECORATE_DRIVER"); op_j.flag=4
-    box3.operator("gta5_trains.mark_junction",       text="Basculer Aiguillage sélectionné", icon="DECORATE_DRIVER")
-    box3.operator("gta5_trains.sync_from_curve",     text="Sync depuis Courbe", icon="FILE_REFRESH")
-    box3.operator("gta5_trains.generate_from_curve", text="Générer depuis Courbe active", icon="CURVE_BEZCURVE")
+    op_j = row_t.operator("gta5_trains.add_point", text="+ Junction", icon="DECORATE_DRIVER"); op_j.flag=4
+    box3.operator("gta5_trains.mark_junction",       text="Toggle Selected Junction", icon="DECORATE_DRIVER")
+    box3.operator("gta5_trains.sync_from_curve",     text="Sync from Curve", icon="FILE_REFRESH")
+    box3.operator("gta5_trains.generate_from_curve", text="Generate from Active Curve", icon="CURVE_BEZCURVE")
     layout.separator(factor=0.2)
     box_pts = layout.box(); box_pts.label(text=f"Points ({props.stat_points})", icon="CURVE_PATH")
     row2 = box_pts.row()
@@ -415,31 +415,31 @@ def _draw_trains(layout, context, props):
     if 0 <= idx < len(props.points):
         pt = props.points[idx]; sub = box_pts.box(); sub.label(text=f"Point {idx}")
         sub.prop(pt,"position"); sub.prop(pt,"flag")
-        sub.operator("gta5_trains.mark_junction", text="Basculer Aiguillage", icon="DECORATE_DRIVER")
+        sub.operator("gta5_trains.mark_junction", text="Toggle Junction", icon="DECORATE_DRIVER")
 
 
 # ── AIDE ──────────────────────────────────────────────────────────────────────
 
 class GTA5_PT_QuickHelp(Panel):
-    bl_label       = "Aide Rapide"; bl_idname = "GTA5_PT_quick_help"
+    bl_label       = "Quick Help"; bl_idname = "GTA5_PT_quick_help"
     bl_space_type  = "VIEW_3D"; bl_region_type = "UI"
     bl_category    = "GTA5 Paths"; bl_options = {"DEFAULT_CLOSED"}
     def draw(self, context):
         layout = self.layout; col = layout.column(); col.scale_y = 0.8
         col.label(text="── YND Viewport ──", icon="EMPTY_ARROWS")
-        col.label(text="● Bleu = noeud véhicule (CUBE)")
-        col.label(text="● Blanc = noeud piéton (SPHERE)")
-        col.label(text="── Vert = liens forward véhicule")
-        col.label(text="── Bleu = liens back lanes")
-        col.label(text="── Rouge = liens piéton")
-        col.label(text="── Marron = liens freeway")
-        col.label(text="── Orange = liens dead-end")
-        col.label(text="□ Violet = junction bounds")
-        col.label(text="↑ Jaune = ticks de direction")
+        col.label(text="● Blue = vehicle node (CUBE)")
+        col.label(text="● White = pedestrian node (SPHERE)")
+        col.label(text="── Green = forward vehicle links")
+        col.label(text="── Blue = back lanes links")
+        col.label(text="── Red = pedestrian links")
+        col.label(text="── Brown = freeway links")
+        col.label(text="── Orange = dead-end links")
+        col.label(text="□ Purple = junction bounds")
+        col.label(text="↑ Yellow = direction ticks")
         col.separator()
         col.label(text="── YNV NavMesh ──", icon="MOD_FLUID")
-        col.label(text="Edit Mode → sélectionner faces")
-        col.label(text="→ Lire flags / Appliquer préset")
+        col.label(text="Edit Mode → select faces")
+        col.label(text="→ Read flags / Apply preset")
         col.separator()
         col.label(text="── YMT Scenarios ──", icon="ARMATURE_DATA")
         col.label(text="Export → .ymt.xml (OpenIV/CodeWalker)")

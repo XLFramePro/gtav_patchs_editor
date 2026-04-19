@@ -247,7 +247,7 @@ def _build_ymt_xml(context, props):
 
 class YMT_OT_Import(Operator):
     """Importe un fichier Scenario YMT XML"""
-    bl_idname = "gta5_ymt.import_xml"; bl_label = "Importer YMT XML"
+    bl_idname = "gta5_ymt.import_xml"; bl_label = "Import YMT XML"
     bl_options = {"REGISTER", "UNDO"}
     filepath:   StringProperty(subtype="FILE_PATH")
     filter_glob:StringProperty(default="*.xml;*.ymt;*.ymt.xml", options={"HIDDEN"})
@@ -267,7 +267,7 @@ class YMT_OT_Import(Operator):
 
 class YMT_OT_Export(Operator):
     """Exporte les scénarios en fichier .ymt XML (compatible OpenIV/CodeWalker)"""
-    bl_idname = "gta5_ymt.export_xml"; bl_label = "Exporter .ymt XML"
+    bl_idname = "gta5_ymt.export_xml"; bl_label = "Export .ymt XML"
     bl_options = {"REGISTER"}
     filepath:   StringProperty(subtype="FILE_PATH")
     filter_glob:StringProperty(default="*.ymt;*.ymt.xml;*.xml", options={"HIDDEN"})
@@ -293,7 +293,7 @@ class YMT_OT_Export(Operator):
 
 class YMT_OT_AddScenarioPoint(Operator):
     """Ajoute un point de scénario au curseur"""
-    bl_idname = "gta5_ymt.add_scenario_point"; bl_label = "Ajouter Point Scénario"
+    bl_idname = "gta5_ymt.add_scenario_point"; bl_label = "Add Scenario Point"
     bl_options = {"REGISTER", "UNDO"}
     itype: IntProperty(name="iType", default=1, min=0, max=21)
     def execute(self, context):
@@ -320,7 +320,7 @@ class YMT_OT_AddScenarioPoint(Operator):
 
 class YMT_OT_RemoveScenarioPoint(Operator):
     """Supprime le point de scénario sélectionné"""
-    bl_idname = "gta5_ymt.remove_scenario_point"; bl_label = "Supprimer Point"
+    bl_idname = "gta5_ymt.remove_scenario_point"; bl_label = "Remove Point"
     bl_options = {"REGISTER", "UNDO"}
     @classmethod
     def poll(cls, context):
@@ -336,7 +336,7 @@ class YMT_OT_RemoveScenarioPoint(Operator):
 
 class YMT_OT_AddChainingNode(Operator):
     """Ajoute un noeud de chaînage au curseur"""
-    bl_idname = "gta5_ymt.add_chaining_node"; bl_label = "Ajouter Noeud Chaînage"
+    bl_idname = "gta5_ymt.add_chaining_node"; bl_label = "Add Chaining Node"
     bl_options = {"REGISTER", "UNDO"}
     def execute(self, context):
         props = context.scene.gta5_pathing.ymt
@@ -357,7 +357,7 @@ class YMT_OT_AddChainingNode(Operator):
 
 class YMT_OT_AddChainingEdge(Operator):
     """Ajoute une arête entre deux noeuds de chaînage"""
-    bl_idname = "gta5_ymt.add_chaining_edge"; bl_label = "Ajouter Arête"
+    bl_idname = "gta5_ymt.add_chaining_edge"; bl_label = "Add Edge"
     bl_options = {"REGISTER", "UNDO"}
     def execute(self, context):
         props = context.scene.gta5_pathing.ymt
@@ -369,7 +369,7 @@ class YMT_OT_AddChainingEdge(Operator):
 
 class YMT_OT_RemoveChainingEdge(Operator):
     """Supprime l'arête de chaînage sélectionnée"""
-    bl_idname = "gta5_ymt.remove_chaining_edge"; bl_label = "Supprimer Arête"
+    bl_idname = "gta5_ymt.remove_chaining_edge"; bl_label = "Remove Edge"
     bl_options = {"REGISTER", "UNDO"}
     @classmethod
     def poll(cls, context):
@@ -385,7 +385,7 @@ class YMT_OT_RemoveChainingEdge(Operator):
 
 class YMT_OT_RemoveAllEdgesFromNode(Operator):
     """Supprime toutes les arêtes du noeud sélectionné"""
-    bl_idname = "gta5_ymt.remove_all_edges_node"; bl_label = "Supprimer Arêtes du Noeud"
+    bl_idname = "gta5_ymt.remove_all_edges_node"; bl_label = "Remove Node Edges"
     bl_options = {"REGISTER", "UNDO"}
     @classmethod
     def poll(cls, context):
@@ -406,7 +406,7 @@ class YMT_OT_RemoveAllEdgesFromNode(Operator):
 
 class YMT_OT_SyncFromObjects(Operator):
     """Synchronise depuis les empties Blender"""
-    bl_idname = "gta5_ymt.sync_from_objects"; bl_label = "Sync depuis Objets"
+    bl_idname = "gta5_ymt.sync_from_objects"; bl_label = "Sync from Objects"
     bl_options = {"REGISTER", "UNDO"}
     def execute(self, context):
         props = context.scene.gta5_pathing.ymt

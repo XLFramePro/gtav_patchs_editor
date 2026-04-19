@@ -1,6 +1,6 @@
 """
-xml_utils.py — Utilitaires XML partagés entre tous les opérateurs.
-Lecture et écriture des formats GTA V : YNV, YND, YMT.
+xml_utils.py — Shared XML utilities.
+Reading and writing GTA V formats: YNV, YND, YMT.
 """
 
 import xml.etree.ElementTree as ET
@@ -12,7 +12,7 @@ from mathutils import Vector
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fval(elem, tag, default=0.0):
-    """Lit la valeur float d'un sous-élément <tag value="..."/>."""
+    """Read the float value from a sub-element <tag value="..."/>."""
     child = elem.find(tag)
     if child is None:
         return default
@@ -23,7 +23,7 @@ def fval(elem, tag, default=0.0):
 
 
 def ival(elem, tag, default=0):
-    """Lit la valeur int d'un sous-élément."""
+    """Read the int value from a sub-element."""
     child = elem.find(tag)
     if child is None:
         return default
@@ -34,7 +34,7 @@ def ival(elem, tag, default=0):
 
 
 def sval(elem, tag, default=""):
-    """Lit la valeur texte d'un sous-élément (attribut value ou text)."""
+    """Read the text value from a sub-element (attribute value or text)."""
     child = elem.find(tag)
     if child is None:
         return default
@@ -45,7 +45,7 @@ def sval(elem, tag, default=""):
 
 
 def bval(elem, tag, default=False):
-    """Lit la valeur booléenne d'un sous-élément."""
+    """Read the boolean value from a sub-element."""
     v = sval(elem, tag, "false" if not default else "true")
     return v.lower() == "true"
 

@@ -215,7 +215,7 @@ def _build_junction_markers(props, col, track_obj):
 class TRAINS_OT_Import(Operator):
     """Importe un fichier trains*.dat dans Blender"""
     bl_idname  = "gta5_trains.import_dat"
-    bl_label   = "Importer trains.dat"
+    bl_label   = "Import trains.dat"
     bl_options = {"REGISTER", "UNDO"}
 
     filepath:   StringProperty(subtype="FILE_PATH")
@@ -249,7 +249,7 @@ class TRAINS_OT_Import(Operator):
 class TRAINS_OT_Export(Operator):
     """Exporte la voie de train en fichier .dat"""
     bl_idname  = "gta5_trains.export_dat"
-    bl_label   = "Exporter trains.dat"
+    bl_label   = "Export trains.dat"
     bl_options = {"REGISTER"}
 
     filepath:   StringProperty(subtype="FILE_PATH")
@@ -278,7 +278,7 @@ class TRAINS_OT_Export(Operator):
 class TRAINS_OT_AddPoint(Operator):
     """Ajoute un point de voie au curseur 3D"""
     bl_idname  = "gta5_trains.add_point"
-    bl_label   = "Ajouter Point"
+    bl_label   = "Add Point"
     bl_options = {"REGISTER", "UNDO"}
 
     flag: IntProperty(name="Flag", default=0, min=0, max=5)
@@ -307,7 +307,7 @@ class TRAINS_OT_AddPoint(Operator):
 class TRAINS_OT_RemovePoint(Operator):
     """Supprime le point de voie sélectionné"""
     bl_idname  = "gta5_trains.remove_point"
-    bl_label   = "Supprimer Point"
+    bl_label   = "Remove Point"
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
@@ -327,7 +327,7 @@ class TRAINS_OT_RemovePoint(Operator):
 class TRAINS_OT_MarkJunction(Operator):
     """Marque le point sélectionné comme aiguillage (flag=4)"""
     bl_idname  = "gta5_trains.mark_junction"
-    bl_label   = "Marquer Aiguillage"
+    bl_label   = "Mark Junction"
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
@@ -347,7 +347,7 @@ class TRAINS_OT_MarkJunction(Operator):
 class TRAINS_OT_SyncFromCurve(Operator):
     """Synchronise les points depuis la courbe Blender"""
     bl_idname  = "gta5_trains.sync_from_curve"
-    bl_label   = "Sync depuis Courbe"
+    bl_label   = "Sync from Curve"
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
@@ -379,7 +379,7 @@ class TRAINS_OT_SyncFromCurve(Operator):
 class TRAINS_OT_GenerateFromCurve(Operator):
     """Génère une voie de train depuis un objet Courbe sélectionné"""
     bl_idname  = "gta5_trains.generate_from_curve"
-    bl_label   = "Générer depuis Courbe Sélectionnée"
+    bl_label   = "Generate from Selected Curve"
     bl_options = {"REGISTER", "UNDO"}
 
     resolution: IntProperty(
