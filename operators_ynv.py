@@ -1,17 +1,8 @@
 """
 operators_ynv.py — Complete NavMesh YNV.
-
-MATERIAL SYSTEM:
-  - Key = bytes 0-3 only (bytes 4-5 = density/audio internal, per-polygon → ignored for material)
-  - Name = "YNV_B{b0:03d}_{b1:03d}_{b2:03d}_{b3:03d}_{DescriptiveName}"
-  - Single shared material per b0/b1/b2/b3 combination
-  - Polygon selection → read flags → display in panel + bytes 4-5 stored in custom prop
-
-COLORS (decreasing priority):
-  Water > Underground > Interior > Isolated > TrainTrack > Shallow
-  > Pavement+Cover > Road+Cover > Pavement > Road > Cover-only > Spawn > Default
 """
-import bpy, bmesh, xml.etree.ElementTree as ET, math, os
+
+import bpy, bmesh, json, xml.etree.ElementTree as ET, math, os
 from bpy.types import Operator
 from bpy.props import StringProperty, BoolProperty, IntProperty, FloatProperty
 from mathutils import Vector
@@ -19,9 +10,6 @@ from .xml_utils import fval, ival, sval, sub_val, sub_text, to_xml_string
 
 YNV_COLLECTION = "YNV_NavMesh"
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  FLAG PRESETS (bytes 0-3, puis bytes 4-5 par défaut)
-# ─────────────────────────────────────────────────────────────────────────────
 FLAG_PRESETS = {
     "ROAD":      (0,   0, 2, 0),
     "PAVEMENT":  (4,   0, 0, 0),
@@ -33,10 +21,6 @@ FLAG_PRESETS = {
     "SPAWN":     (0,   0, 3, 0),
     "CUSTOM":    (0,   0, 0, 0),
 }
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  COULEURS ET NOMS PAR FLAGS (bytes 0-3 uniquement)
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _flag_label_parts(b0, b1, b2, b3):
     """Returns a list of strings describing active flags."""
@@ -65,19 +49,19 @@ def _flag_label_parts(b0, b1, b2, b3):
 
 def _flag_color(b0, b1, b2, b3):
     """Returns RGBA (0-1) according to surface priority."""
-    if b0 & 128:            return (0.05, 0.15, 0.85, 0.85)   # Water — bleu profond
-    if b0 & 8:              return (0.15, 0.45, 0.15, 0.85)   # Underground — vert foncé
+    if b0 & 128:            return (0.05, 0.15, 0.85, 0.85)   # Water — deep blue
+    if b0 & 8:              return (0.15, 0.45, 0.15, 0.85)   # Underground — dark green
     if b1 & 32:             return (0.85, 0.45, 0.10, 0.85)   # Interior — orange
-    if b1 & 64:             return (0.85, 0.10, 0.10, 0.80)   # Isolated — rouge
-    if b2 & 8:              return (0.55, 0.35, 0.05, 0.85)   # TrainTrack — marron
+    if b1 & 64:             return (0.85, 0.10, 0.10, 0.80)   # Isolated — red
+    if b2 & 8:              return (0.55, 0.35, 0.05, 0.85)   # TrainTrack — brown
     if b2 & 16:             return (0.15, 0.70, 0.90, 0.80)   # Shallow — cyan
-    if (b0 & 4) and b3:     return (0.60, 0.82, 0.30, 0.85)   # Pavement+Cover — vert-jaune
-    if (b2 & 2) and b3:     return (0.92, 0.72, 0.08, 0.85)   # Road+Cover — ambre
-    if b0 & 4:              return (0.42, 0.78, 0.42, 0.85)   # Pavement — vert
-    if b2 & 2:              return (0.78, 0.78, 0.18, 0.85)   # Road — jaune
-    if b3:                  return (0.78, 0.10, 0.78, 0.80)   # Cover-only — violet
-    if b2 & 1:              return (0.18, 0.78, 0.85, 0.80)   # Spawn — cyan-vert
-    return (0.50, 0.50, 0.50, 0.75)                           # Default — gris
+    if (b0 & 4) and b3:     return (0.60, 0.82, 0.30, 0.85)   # Pavement+Cover — yellow-green
+    if (b2 & 2) and b3:     return (0.92, 0.72, 0.08, 0.85)   # Road+Cover — amber
+    if b0 & 4:              return (0.42, 0.78, 0.42, 0.85)   # Pavement — green
+    if b2 & 2:              return (0.78, 0.78, 0.18, 0.85)   # Road — yellow
+    if b3:                  return (0.78, 0.10, 0.78, 0.80)   # Cover-only — purple
+    if b2 & 1:              return (0.18, 0.78, 0.85, 0.80)   # Spawn — teal
+    return (0.50, 0.50, 0.50, 0.75)                           # Default — grey
 
 
 def _mat_key(b0, b1, b2, b3):
@@ -89,7 +73,7 @@ def _mat_name(b0, b1, b2, b3):
     """Complete material name with readable description, max 63 chars."""
     label = "_".join(_flag_label_parts(b0, b1, b2, b3))
     base  = f"YNV_{label}"
-    return base[:63]   # Blender limite les noms à 63 chars
+    return base[:63]   # Blender limits names to 63 chars
 
 
 def _get_or_create_material(b0, b1, b2, b3):
@@ -132,7 +116,7 @@ def _get_or_create_material(b0, b1, b2, b3):
     # Set viewport color for solid mode visibility
     mat.diffuse_color = color
 
-    # Stocker les flags dans les custom props du matériau
+    # Store flags in material custom props
     mat["ynv_b0"] = b0; mat["ynv_b1"] = b1
     mat["ynv_b2"] = b2; mat["ynv_b3"] = b3
 
@@ -249,7 +233,7 @@ def _link_obj(obj, col):
 
 
 def _build_navmesh_obj(polygons_data, area_id):
-    """Construit le mesh Blender avec matériaux partagés par (b0,b1,b2,b3)."""
+    """Builds the Blender mesh with shared materials per (b0,b1,b2,b3)."""
     vert_map    = {}
     verts_list  = []
     faces_list  = []
@@ -275,8 +259,8 @@ def _build_navmesh_obj(polygons_data, area_id):
     mesh.from_pydata(verts_list, [], faces_list)
     mesh.update()
 
-    # Créer/récupérer les matériaux sans doublons par (b0,b1,b2,b3)
-    # Dictionnaire mat_key → index dans mesh.materials
+    # Create/retrieve materials without duplicates per (b0,b1,b2,b3)
+    # Dictionary mat_key → index in mesh.materials
     mat_index_map = {}
 
     for i, (b0, b1, b2, b3, b4, b5) in enumerate(face_flags):
@@ -286,18 +270,17 @@ def _build_navmesh_obj(polygons_data, area_id):
             mesh.materials.append(mat)
             mat_index_map[key] = len(mesh.materials) - 1
 
-    # Assigner le material_index à chaque polygone
+    # Assign material_index to each polygon
     for i, (b0, b1, b2, b3, b4, b5) in enumerate(face_flags):
         key = _mat_key(b0, b1, b2, b3)
         mesh.polygons[i].material_index = mat_index_map[key]
-        # Stocker les bytes 4-5 (densité interne) dans un attribut custom sur la face si possible
-        # On les stocke dans un layer d'attribut via bpy si nécessaire — pour l'instant on passe
+        # Store bytes 4-5 (internal density) in polygon custom prop if possible
+        # For now, we store them in a layer via bpy if necessary — but pass
 
     obj = bpy.data.objects.new(f"YNV_{area_id}_PolyMesh", mesh)
     obj["ynv_type"]    = "poly_mesh"
     obj["ynv_area_id"] = area_id
-    # Store bytes 4-5 and edge data for a faithful XML rebuild.
-    import json
+    # Store bytes 4-5 and edge data for faithful XML rebuilding.
     b45_data = [(ff[4], ff[5]) for ff in face_flags]
     obj["ynv_bytes45"] = json.dumps(b45_data)
     obj["ynv_edge_lines"] = json.dumps(face_edges)
@@ -355,7 +338,6 @@ def _build_ynv_xml(context, props):
     poly_obj   = next((o for o in context.scene.objects if o.get("ynv_type") == "poly_mesh"), None)
     if poly_obj and poly_obj.type == "MESH":
         mesh      = poly_obj.data
-        import json
         b45_data    = json.loads(poly_obj.get("ynv_bytes45", "[]"))
         edge_lines  = json.loads(poly_obj.get("ynv_edge_lines", "[]"))
 
@@ -417,26 +399,26 @@ def _build_ynv_xml(context, props):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  LECTURE DES FLAGS DU POLYGONE SÉLECTIONNÉ
+# READ SELECTED POLYGON FLAGS
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _read_selected_face_flags(context, props):
     """
-    Lit les flags du premier polygone sélectionné en Edit Mode
-    et les copie dans props.selected_poly_flags + renseigne les bytes 4-5.
-    Retourne (ok, message).
+    Reads flags from the first selected polygon in Edit Mode
+    and copies them to props.selected_poly_flags + fills bytes 4-5.
+    Returns (ok, message).
     """
     obj = context.active_object
     if obj is None or obj.type != "MESH" or obj.get("ynv_type") != "poly_mesh":
-        return False, "Activer le PolyMesh YNV en Edit Mode."
+        return False, "Activate the YNV PolyMesh in Edit Mode."
     if obj.mode != "EDIT":
-        return False, "Passer en Edit Mode et sélectionner une face."
+        return False, "Switch to Edit Mode and select a face."
 
     mesh = obj.data
     bm   = bmesh.from_edit_mesh(mesh)
     selected_faces = [f for f in bm.faces if f.select]
     if not selected_faces:
-        return False, "Aucune face sélectionnée."
+        return False, "No face selected."
 
     face = selected_faces[0]
     fi   = face.index
@@ -444,34 +426,33 @@ def _read_selected_face_flags(context, props):
 
     mat  = mesh.materials[mi] if mi < len(mesh.materials) else None
 
-    # Récupérer b0-b3 depuis le matériau
+    # Retrieve b0-b3 from the material
     if mat and "ynv_b0" in mat:
         b0 = int(mat["ynv_b0"]); b1 = int(mat["ynv_b1"])
         b2 = int(mat["ynv_b2"]); b3 = int(mat["ynv_b3"])
     else:
         b0, b1, b2, b3 = 0, 0, 0, 0
 
-    # Récupérer b4-b5 depuis la custom prop JSON de l'objet
-    import json
+    # Retrieve b4-b5 from the object's JSON custom prop
     try:
         b45_data = json.loads(obj.get("ynv_bytes45", "[]"))
         b4, b5   = b45_data[fi] if fi < len(b45_data) else (0, 0)
     except Exception:
         b4, b5 = 0, 0
 
-    # Appliquer aux PropertyGroup flags
+    # Apply to PropertyGroup flags
     pf = props.selected_poly_flags
     pf.poly_index = fi
     flags_str = f"{b0} {b1} {b2} {b3} {b4} {b5}"
     pf.from_flags_str(flags_str)
 
-    mat_name = mat.name if mat else "(aucun)"
+    mat_name = mat.name if mat else "(none)"
     labels   = " + ".join(_flag_label_parts(b0, b1, b2, b3))
     return True, f"Face {fi} : [{b0} {b1} {b2} {b3}] {labels} | b4={b4} b5={b5}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  OPÉRATEURS
+# OPERATORS
 # ─────────────────────────────────────────────────────────────────────────────
 
 class YNV_OT_Import(Operator):
@@ -497,9 +478,9 @@ class YNV_OT_Import(Operator):
         _build_navpoints_objs(props, col)
         n_mats = len(set(m.name for m in bpy.data.materials if m.name.startswith("YNV_")))
         self.report({"INFO"},
-            f"YNV importé : {props.stat_polygons} polygones, "
-            f"{n_mats} matériaux uniques, "
-            f"{props.stat_portals} portails, "
+            f"YNV imported: {props.stat_polygons} polygons, "
+            f"{n_mats} unique materials, "
+            f"{props.stat_portals} portals, "
             f"{props.stat_navpoints} points")
         return {"FINISHED"}
 
@@ -523,13 +504,13 @@ class YNV_OT_Export(Operator):
         except OSError as e:
             self.report({"ERROR"}, str(e)); return {"CANCELLED"}
         props.filepath = self.filepath
-        self.report({"INFO"}, f"YNV exporté → {self.filepath}")
+        self.report({"INFO"}, f"YNV exported → {self.filepath}")
         return {"FINISHED"}
 
 
 class YNV_OT_ReadSelectedFlags(Operator):
-    """Lit les flags du polygone sélectionné (Edit Mode) et les affiche dans le panneau"""
-    bl_idname  = "gta5_ynv.read_selected_flags"; bl_label = "Lire flags depuis sélection"
+    """Reads flags from selected polygon (Edit Mode) and displays in panel"""
+    bl_idname  = "gta5_ynv.read_selected_flags"; bl_label = "Read flags from selection"
     bl_options = {"REGISTER"}
     @classmethod
     def poll(cls, context):
@@ -543,8 +524,8 @@ class YNV_OT_ReadSelectedFlags(Operator):
 
 
 class YNV_OT_ApplyFlagsPreset(Operator):
-    """Applique le preset de flags aux faces sélectionnées"""
-    bl_idname  = "gta5_ynv.apply_flags_preset"; bl_label = "Appliquer Préset"
+    """Applies flag preset to selected faces"""
+    bl_idname  = "gta5_ynv.apply_flags_preset"; bl_label = "Apply Preset"
     bl_options = {"REGISTER", "UNDO"}
     @classmethod
     def poll(cls, context):
@@ -558,8 +539,8 @@ class YNV_OT_ApplyFlagsPreset(Operator):
 
 
 class YNV_OT_ApplyCustomFlags(Operator):
-    """Applique les flags personnalisés du panneau aux faces sélectionnées"""
-    bl_idname  = "gta5_ynv.apply_custom_flags"; bl_label = "Appliquer Flags Custom"
+    """Applies custom flags from panel to selected faces"""
+    bl_idname  = "gta5_ynv.apply_custom_flags"; bl_label = "Apply Custom Flags"
     bl_options = {"REGISTER", "UNDO"}
     @classmethod
     def poll(cls, context):
@@ -574,12 +555,12 @@ class YNV_OT_ApplyCustomFlags(Operator):
 
 
 def _apply_flags_to_selection(context, props, b0, b1, b2, b3, label):
-    """Helper : applique un matériau (b0,b1,b2,b3) aux faces sélectionnées."""
+    """Applies a material (b0,b1,b2,b3) to selected faces."""
     obj  = context.active_object
     mesh = obj.data
     mat  = _get_or_create_material(b0, b1, b2, b3)
 
-    # Ajouter le matériau au mesh s'il n'y est pas encore
+    # Add the material to the mesh if not already present
     if mat.name not in [m.name for m in mesh.materials]:
         mesh.materials.append(mat)
 
@@ -587,36 +568,29 @@ def _apply_flags_to_selection(context, props, b0, b1, b2, b3, label):
 
     bm = bmesh.from_edit_mesh(mesh)
     count = 0
-    import json
     b45_raw = obj.get("ynv_bytes45", "[]")
     try:
         b45_data = json.loads(b45_raw)
     except Exception:
         b45_data = []
 
-    # S'assurer que b45_data a assez d'entrées
+    # Ensure b45_data has enough entries
     while len(b45_data) < len(mesh.polygons):
         b45_data.append([0, 0])
 
     for face in bm.faces:
         if face.select:
-            old_mi    = face.material_index
             face.material_index = mi
-            count     += 1
+            count += 1
 
     bmesh.update_edit_mesh(mesh)
     obj["ynv_bytes45"] = json.dumps(b45_data)
-
-    name  = _mat_name(b0, b1, b2, b3)
-    parts = _flag_label_parts(b0, b1, b2, b3)
-    from bpy.types import Operator as _Op
-    # On ne peut pas self.report ici, donc on retourne juste FINISHED
     return {"FINISHED"}
 
 
 class YNV_OT_AddPolygon(Operator):
-    """Ajoute un quad navmesh au curseur avec le préset actif"""
-    bl_idname  = "gta5_ynv.add_polygon"; bl_label = "Ajouter Polygone"
+    """Adds a navmesh quad at cursor with active preset"""
+    bl_idname  = "gta5_ynv.add_polygon"; bl_label = "Add Polygon"
     bl_options = {"REGISTER", "UNDO"}
     def execute(self, context):
         props  = context.scene.gta5_pathing.ynv
@@ -651,15 +625,14 @@ class YNV_OT_AddPolygon(Operator):
         bm.free()
         poly_obj.data.update()
 
-        # Assigner matériau à la dernière face
+        # Assign material to last face
         mesh = poly_obj.data
         if mat.name not in [m.name for m in mesh.materials]:
             mesh.materials.append(mat)
         mi = list(mesh.materials).index(mat)
         mesh.polygons[-1].material_index = mi
 
-        # Mettre à jour b45_data
-        import json
+        # Update b45_data
         try:
             b45_data = json.loads(poly_obj.get("ynv_bytes45","[]"))
         except Exception:
@@ -669,13 +642,13 @@ class YNV_OT_AddPolygon(Operator):
 
         props.stat_polygons = len(mesh.polygons)
         labels = " + ".join(_flag_label_parts(b0, b1, b2, b3))
-        self.report({"INFO"}, f"Polygone ajouté : [{b0} {b1} {b2} {b3}] {labels}")
+        self.report({"INFO"}, f"Polygon added: [{b0} {b1} {b2} {b3}] {labels}")
         return {"FINISHED"}
 
 
 class YNV_OT_AddPortal(Operator):
-    """Ajoute un portail NavMesh"""
-    bl_idname  = "gta5_ynv.add_portal"; bl_label = "Ajouter Portail"
+    """Adds a NavMesh portal"""
+    bl_idname  = "gta5_ynv.add_portal"; bl_label = "Add Portal"
     bl_options = {"REGISTER", "UNDO"}
     def execute(self, context):
         props = context.scene.gta5_pathing.ynv
@@ -688,8 +661,8 @@ class YNV_OT_AddPortal(Operator):
 
 
 class YNV_OT_RemovePortal(Operator):
-    """Supprime le portail sélectionné"""
-    bl_idname  = "gta5_ynv.remove_portal"; bl_label = "Supprimer Portail"
+    """Removes selected portal"""
+    bl_idname  = "gta5_ynv.remove_portal"; bl_label = "Remove Portal"
     bl_options = {"REGISTER", "UNDO"}
     @classmethod
     def poll(cls, context):
@@ -704,8 +677,8 @@ class YNV_OT_RemovePortal(Operator):
 
 
 class YNV_OT_AddNavPoint(Operator):
-    """Ajoute un nav point au curseur"""
-    bl_idname  = "gta5_ynv.add_nav_point"; bl_label = "Ajouter Nav Point"
+    """Adds a nav point at cursor"""
+    bl_idname  = "gta5_ynv.add_nav_point"; bl_label = "Add Nav Point"
     bl_options = {"REGISTER", "UNDO"}
     def execute(self, context):
         props  = context.scene.gta5_pathing.ynv
@@ -718,8 +691,8 @@ class YNV_OT_AddNavPoint(Operator):
 
 
 class YNV_OT_RemoveNavPoint(Operator):
-    """Supprime le nav point sélectionné"""
-    bl_idname  = "gta5_ynv.remove_nav_point"; bl_label = "Supprimer Nav Point"
+    """Removes selected nav point"""
+    bl_idname  = "gta5_ynv.remove_nav_point"; bl_label = "Remove Nav Point"
     bl_options = {"REGISTER", "UNDO"}
     @classmethod
     def poll(cls, context):
@@ -734,8 +707,8 @@ class YNV_OT_RemoveNavPoint(Operator):
 
 
 class YNV_OT_SyncFromObjects(Operator):
-    """Synchronise portails et nav points depuis les empties"""
-    bl_idname  = "gta5_ynv.sync_from_objects"; bl_label = "Sync depuis Objets"
+    """Syncs portals and nav points from empties"""
+    bl_idname  = "gta5_ynv.sync_from_objects"; bl_label = "Sync from Objects"
     bl_options = {"REGISTER", "UNDO"}
     def execute(self, context):
         props = context.scene.gta5_pathing.ynv
@@ -747,33 +720,33 @@ class YNV_OT_SyncFromObjects(Operator):
             np.point_type = obj.get("point_type", 0)
             np.angle      = obj.rotation_euler.z
         props.stat_navpoints = len(props.nav_points)
-        self.report({"INFO"}, f"Sync : {len(props.nav_points)} nav points")
+        self.report({"INFO"}, f"Sync: {len(props.nav_points)} nav points")
         return {"FINISHED"}
 
 
 class YNV_OT_ComputeBBox(Operator):
-    """Recalcule la bounding box depuis le mesh"""
-    bl_idname  = "gta5_ynv.compute_bbox"; bl_label = "Calculer BB"
+    """Recalculates bounding box from mesh"""
+    bl_idname  = "gta5_ynv.compute_bbox"; bl_label = "Compute BB"
     bl_options = {"REGISTER", "UNDO"}
     def execute(self, context):
         props    = context.scene.gta5_pathing.ynv
         poly_obj = next((o for o in context.scene.objects if o.get("ynv_type") == "poly_mesh"), None)
         if poly_obj is None or poly_obj.type != "MESH":
-            self.report({"WARNING"}, "Aucun mesh YNV"); return {"CANCELLED"}
+            self.report({"WARNING"}, "No YNV mesh"); return {"CANCELLED"}
         verts = [poly_obj.matrix_world @ v.co for v in poly_obj.data.vertices]
         if not verts: return {"CANCELLED"}
         props.bb_min = (min(v.x for v in verts), min(v.y for v in verts), min(v.z for v in verts))
         props.bb_max = (max(v.x for v in verts), max(v.y for v in verts), max(v.z for v in verts))
-        self.report({"INFO"}, "Bounding Box calculée.")
+        self.report({"INFO"}, "Bounding Box calculated.")
         return {"FINISHED"}
 
 
 class YNV_OT_SplitMesh(Operator):
-    """Découpe le mesh selon la grille Tile Size / Offset"""
+    """Splits mesh according to Tile Size / Offset grid"""
     bl_idname  = "gta5_ynv.split_mesh"; bl_label = "Split Mesh"
     bl_options = {"REGISTER", "UNDO"}
     def execute(self, context):
-        self.report({"INFO"}, "Split Mesh : utiliser un outil externe (CodeWalker) pour le découpage en tuiles.")
+        self.report({"INFO"}, "Split Mesh: use an external tool (CodeWalker) for tile splitting.")
         return {"FINISHED"}
 
 

@@ -8,7 +8,7 @@ from mathutils import Vector
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  LECTURE
+#  READING
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fval(elem, tag, default=0.0):
@@ -51,7 +51,7 @@ def bval(elem, tag, default=False):
 
 
 def vec3(elem, tag, default=(0.0, 0.0, 0.0)):
-    """Lit un vecteur XYZ depuis <tag x="..." y="..." z="..."/>."""
+    """Read an XYZ vector from <tag x="..." y="..." z="..."/>."""
     child = elem.find(tag)
     if child is None:
         return default
@@ -66,7 +66,7 @@ def vec3(elem, tag, default=(0.0, 0.0, 0.0)):
 
 
 def vec4(elem, tag, default=(0.0, 0.0, 0.0, 0.0)):
-    """Lit un vecteur XYZW depuis <tag x="..." y="..." z="..." w="..."/>."""
+    """Read an XYZW vector from <tag x="..." y="..." z="..." w="..."/>."""
     child = elem.find(tag)
     if child is None:
         return default
@@ -82,25 +82,25 @@ def vec4(elem, tag, default=(0.0, 0.0, 0.0, 0.0)):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  ÉCRITURE
+#  WRITING
 # ─────────────────────────────────────────────────────────────────────────────
 
 def sub_val(parent, tag, value):
-    """Crée <tag value="value"/> sous parent."""
+    """Create <tag value="value"/> under parent."""
     el = ET.SubElement(parent, tag)
     el.set("value", str(value))
     return el
 
 
 def sub_text(parent, tag, text):
-    """Crée <tag>text</tag> sous parent."""
+    """Create <tag>text</tag> under parent."""
     el = ET.SubElement(parent, tag)
     el.text = str(text)
     return el
 
 
 def sub_vec3(parent, tag, x, y, z):
-    """Crée <tag x="x" y="y" z="z"/> sous parent."""
+    """Create <tag x="x" y="y" z="z"/> under parent."""
     el = ET.SubElement(parent, tag)
     el.set("x", f"{x:.7g}")
     el.set("y", f"{y:.7g}")
@@ -109,7 +109,7 @@ def sub_vec3(parent, tag, x, y, z):
 
 
 def sub_vec4(parent, tag, x, y, z, w):
-    """Crée <tag x="x" y="y" z="z" w="w"/> sous parent."""
+    """Create <tag x="x" y="y" z="z" w="w"/> under parent."""
     el = ET.SubElement(parent, tag)
     el.set("x", f"{x:.7g}")
     el.set("y", f"{y:.7g}")
@@ -119,6 +119,6 @@ def sub_vec4(parent, tag, x, y, z, w):
 
 
 def to_xml_string(root) -> str:
-    """Sérialise un ElementTree en chaîne XML formatée."""
+    """Serialize an ElementTree to a formatted XML string."""
     ET.indent(root, space=" ")
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding="unicode")

@@ -30,28 +30,29 @@ import gpu
 import math
 from gpu_extras.batch import batch_for_shader
 from mathutils import Vector
+from bpy_extras.view3d_utils import location_3d_to_region_2d
 
 _handle      = None
-_handle_3d   = None   # handler pour le picking par rayon
+_handle_3d   = None   # reserved for future ray-picking handler
 
-# ── COULEURS ──────────────────────────────────────────────────────────────────
-# Overlays de voies
-C_FWD_LANE    = (0.05, 0.70, 0.05, 0.35)   # vert transparent
-C_BACK_LANE   = (0.55, 0.08, 0.02, 0.35)   # rouge-brun transparent
-# Liens
-C_VEH         = (0.25, 0.55, 1.00, 1.0)    # bleu
+# ── COLORS ────────────────────────────────────────────────────────────────────
+# Lane overlays
+C_FWD_LANE    = (0.05, 0.70, 0.05, 0.35)   # transparent green
+C_BACK_LANE   = (0.55, 0.08, 0.02, 0.35)   # transparent red-brown
+# Links
+C_VEH         = (0.25, 0.55, 1.00, 1.0)    # blue
 C_SHORTCUT    = (0.00, 0.85, 1.00, 1.0)    # cyan
-C_PED         = (0.90, 0.10, 0.10, 1.0)    # rouge
+C_PED         = (0.90, 0.10, 0.10, 1.0)    # red
 C_PARKING     = (0.85, 0.00, 0.85, 1.0)    # magenta
-C_FREEWAY     = (0.40, 0.12, 0.02, 1.0)    # marron
+C_FREEWAY     = (0.40, 0.12, 0.02, 1.0)    # brown
 C_DEAD_END    = (1.00, 0.50, 0.00, 1.0)    # orange
-C_SLOW        = (0.90, 0.90, 0.10, 1.0)    # jaune
-# Noeuds
-C_NODE_VEH    = (1.00, 1.00, 1.00, 1.0)    # blanc
-C_NODE_PED    = (0.80, 0.80, 0.80, 0.8)    # blanc grisé
-C_SELECTED    = (1.00, 0.88, 0.00, 1.0)    # jaune vif
-# Autres
-C_JUNCTION    = (0.55, 0.00, 0.85, 0.55)   # violet
+C_SLOW        = (0.90, 0.90, 0.10, 1.0)    # yellow
+# Nodes
+C_NODE_VEH    = (1.00, 1.00, 1.00, 1.0)    # white
+C_NODE_PED    = (0.80, 0.80, 0.80, 0.8)    # grayish white
+C_SELECTED    = (1.00, 0.88, 0.00, 1.0)    # bright yellow
+# Other
+C_JUNCTION    = (0.55, 0.00, 0.85, 0.55)   # purple
 C_YMT_CHAIN   = (1.00, 0.85, 0.15, 0.9)
 C_TRAINS      = (0.40, 0.40, 0.40, 0.9)
 C_TRAIN_JCT   = (1.00, 0.40, 0.00, 1.0)
@@ -59,7 +60,7 @@ C_YNV_BB      = (0.20, 0.80, 1.00, 0.5)
 
 PED_TYPES = {"PED_CROSSING", "PED_ASSISTED", "PED_NOWAIT"}
 
-LANE_WIDTH = 1.8   # largeur de base par voie en unités Blender
+LANE_WIDTH = 1.8   # base lane width per lane in Blender units
 
 
 def _set_lw(w):
@@ -69,27 +70,6 @@ def _set_lw(w):
 def _set_ps(s):
     try: gpu.state.point_size_set(s)
     except Exception: pass
-
-
-def _draw_lines(shader, verts, color, width=1.5):
-    if len(verts) < 2: return
-    _set_lw(width)
-    batch_for_shader(shader, "LINES", {"pos": verts}).draw(shader)
-    shader.uniform_float("color", color)
-    batch_for_shader(shader, "LINES", {"pos": verts}).draw(shader)
-
-
-def _draw_tris(shader, verts, color):
-    """Dessine des triangles remplis (pour les overlays de voies)."""
-    if len(verts) < 3: return
-    batch_for_shader(shader_uniform, "TRIS", {"pos": verts}).draw(shader_uniform)
-
-
-def _draw_pts(shader, verts, color, size=6.0):
-    if not verts: return
-    _set_ps(size)
-    shader.uniform_float("color", color)
-    batch_for_shader(shader, "POINTS", {"pos": verts}).draw(shader)
 
 
 def _batch_lines(shader, verts, color, width=1.5):
@@ -114,27 +94,27 @@ def _batch_pts(shader, verts, color, size=6.0):
 
 
 def _batch_tris(shader, verts, color):
-    """Dessine une liste de triangles (tris consécutifs)."""
+    """Draw a list of sequential triangles."""
     if len(verts) < 3: return
     shader.uniform_float("color", color)
     batch_for_shader(shader, "TRIS", {"pos": verts}).draw(shader)
 
 
-# ── GÉOMÉTRIE ─────────────────────────────────────────────────────────────────
+# ── GEOMETRY ──────────────────────────────────────────────────────────────────
 
 def _lane_quad(pos_a, pos_b, offset, half_w):
     """
-    Retourne 6 vertices (2 triangles) formant un rectangle le long d'un lien.
-    offset  = décalage latéral du centre du rectangle (peut être négatif)
-    half_w  = demi-largeur du rectangle
+    Return 6 vertices (2 triangles) forming a rectangle along a link.
+    offset  = lateral offset of the rectangle center (can be negative)
+    half_w  = half-width of the rectangle
     """
     ax, ay, az = pos_a; bx, by, bz = pos_b
     dx, dy, dz = bx-ax, by-ay, bz-az
     length = math.sqrt(dx*dx + dy*dy + dz*dz)
     if length < 0.01: return []
-    nx, ny = -dy/length, dx/length   # perpendiculaire 2D
+    nx, ny = -dy/length, dx/length   # 2D perpendicular
 
-    # Les 4 coins du rectangle
+    # The 4 corners of the rectangle
     ox, oy = nx*offset, ny*offset
     wx, wy = nx*half_w, ny*half_w
 
@@ -147,22 +127,20 @@ def _lane_quad(pos_a, pos_b, offset, half_w):
 
 
 def _arrows_along(pos_a, pos_b, spacing=8.0, size=2.0):
-    """
-    Génère des flèches (chevrons) le long d'un lien, espacées régulièrement.
-    """
+    """Generate chevron arrows spaced evenly along a link."""
     ax, ay, az = pos_a; bx, by, bz = pos_b
     dx, dy, dz = bx-ax, by-ay, bz-az
     length = math.sqrt(dx*dx + dy*dy + dz*dz)
     if length < spacing: return []
     ux, uy = dx/length, dy/length
-    nx, ny = -uy, ux   # perpendiculaire
+    nx, ny = -uy, ux   # perpendicular
 
     result = []
     num = max(1, int(length / spacing))
     for i in range(1, num + 1):
         t  = i / (num + 1)
         cx = ax + dx*t; cy = ay + dy*t; cz = az + dz*t
-        # Chevron : deux demi-branches
+        # Chevron: two half-branches
         s = size * 0.6
         lx = cx - ux*s + nx*s*0.5; ly = cy - uy*s + ny*s*0.5
         rx = cx - ux*s - nx*s*0.5; ry = cy - uy*s - ny*s*0.5
@@ -171,7 +149,7 @@ def _arrows_along(pos_a, pos_b, spacing=8.0, size=2.0):
 
 
 def _jct_rect(pos, r=6.0):
-    """Rectangle de junction autour d'un point."""
+    """Junction rectangle around a point."""
     x, y, z = pos
     return [
         (x-r,y-r,z),(x+r,y-r,z), (x+r,y-r,z),(x+r,y+r,z),
@@ -179,36 +157,46 @@ def _jct_rect(pos, r=6.0):
     ]
 
 
-# ── PICKING : SÉLECTION AU CLIC ───────────────────────────────────────────────
+# ── PICKING : CLICK SELECTION ────────────────────────────────────────────────
 
-def _find_closest_node_index(props, ray_origin, ray_dir, max_dist=8.0):
-    """
-    Trouve le noeud le plus proche du rayon de la caméra.
-    Retourne l'index dans props.nodes ou -1.
-    """
-    best_idx  = -1
-    best_dist = max_dist
+def _find_node_under_cursor(props, region, rv3d, coord, pixel_radius=10.0):
+    """Find node only if cursor is really over it in screen space."""
+    best_idx = -1
+    best_key = None
+    r2 = pixel_radius * pixel_radius
+
+    view_origin = rv3d.view_matrix.inverted().translation
+    view_dir = rv3d.view_rotation @ Vector((0.0, 0.0, -1.0))
 
     for i, node in enumerate(props.nodes):
         pos = Vector(node.position)
-        # Distance du point au rayon
-        to_pos = pos - ray_origin
-        proj   = to_pos.dot(ray_dir)
-        if proj < 0: continue
-        closest = ray_origin + ray_dir * proj
-        d = (pos - closest).length
-        if d < best_dist:
-            best_dist = d
-            best_idx  = i
+        depth = (pos - view_origin).dot(view_dir)
+        if depth <= 0:
+            continue
+
+        screen = location_3d_to_region_2d(region, rv3d, pos)
+        if screen is None:
+            continue
+
+        dx = screen.x - coord[0]
+        dy = screen.y - coord[1]
+        d2 = dx * dx + dy * dy
+        if d2 > r2:
+            continue
+
+        key = (d2, depth)
+        if best_key is None or key < best_key:
+            best_key = key
+            best_idx = i
 
     return best_idx
 
 
 class YND_OT_ClickSelectNode(bpy.types.Operator):
-    """Clic dans le viewport pour sélectionner un noeud YND"""
+    """Click in the viewport to select a YND node"""
     bl_idname  = "gta5_ynd.click_select_node"
-    bl_label   = "Sélectionner Noeud YND"
-    bl_options = set()   # pas REGISTER pour éviter spam historique
+    bl_label   = "Select YND Node"
+    bl_options = set()   # no REGISTER to avoid history spam
 
     @classmethod
     def poll(cls, context):
@@ -220,16 +208,11 @@ class YND_OT_ClickSelectNode(bpy.types.Operator):
             props = context.scene.gta5_pathing.ynd
             if not props.nodes: return {"PASS_THROUGH"}
 
-            # Construire le rayon depuis la souris
             region = context.region
             rv3d   = context.region_data
             coord  = (event.mouse_region_x, event.mouse_region_y)
 
-            from bpy_extras.view3d_utils import region_2d_to_origin_3d, region_2d_to_vector_3d
-            ray_origin = region_2d_to_origin_3d(region, rv3d, coord)
-            ray_dir    = region_2d_to_vector_3d(region, rv3d, coord).normalized()
-
-            idx = _find_closest_node_index(props, ray_origin, ray_dir, max_dist=12.0)
+            idx = _find_node_under_cursor(props, region, rv3d, coord, pixel_radius=10.0)
             if idx >= 0:
                 props.node_index = idx
                 # Forcer le redraw du panneau
@@ -245,9 +228,9 @@ class YND_OT_ClickSelectNode(bpy.types.Operator):
 
 
 class YND_OT_ActivateClickSelect(bpy.types.Operator):
-    """Active le mode sélection au clic pour les noeuds YND"""
+    """Activate click-select mode for YND nodes"""
     bl_idname = "gta5_ynd.activate_click_select"
-    bl_label  = "Activer Clic-Sélection"
+    bl_label  = "Activate Click Selection"
     bl_options = set()
 
     def invoke(self, context, event):
@@ -279,11 +262,8 @@ class YND_OT_ActivateClickSelect(bpy.types.Operator):
                 props = context.scene.gta5_pathing.ynd
 
                 coord = (event.mouse_x - region.x, event.mouse_y - region.y)
-                from bpy_extras.view3d_utils import region_2d_to_origin_3d, region_2d_to_vector_3d
                 try:
-                    ray_origin = region_2d_to_origin_3d(region, rv3d, coord)
-                    ray_dir    = region_2d_to_vector_3d(region, rv3d, coord).normalized()
-                    idx = _find_closest_node_index(props, ray_origin, ray_dir, max_dist=15.0)
+                    idx = _find_node_under_cursor(props, region, rv3d, coord, pixel_radius=10.0)
                     if idx >= 0:
                         props.node_index = idx
                         for a in context.screen.areas:
@@ -294,7 +274,7 @@ class YND_OT_ActivateClickSelect(bpy.types.Operator):
         return {"PASS_THROUGH"}
 
 
-# ── DRAW PRINCIPAL ─────────────────────────────────────────────────────────────
+# ── MAIN DRAW ─────────────────────────────────────────────────────────────────
 
 def _draw_viewport():
     context = bpy.context
@@ -315,7 +295,7 @@ def _draw_viewport():
         props   = gp.ynd
         sel_idx = props.node_index
 
-        # ── Construire l'index des positions ────────────────────────────────
+        # ── Build position index ─────────────────────────────────────────────
         node_pos  = {}
         node_ped  = {}
         node_free = {}
@@ -330,7 +310,7 @@ def _draw_viewport():
                 node_ped[key]  = False
                 node_free[key] = False
 
-        # ── Listes de géométrie ─────────────────────────────────────────────
+        # ── Geometry lists ──────────────────────────────────────────────────
         tris_fwd   = []   # overlays verts (forward lanes)
         tris_back  = []   # overlays rouges (back lanes)
         tris_jct   = []   # overlays violets (junctions)
@@ -408,18 +388,18 @@ def _draw_viewport():
                 if not is_lk_ped and props.show_vehicle:
                     lane_w = LANE_WIDTH * (0.6 if is_narrow else 1.0)
 
-                    # Forward lanes — bande verte centrée à +offset
+                    # Forward lanes — green band at +offset
                     fwd_half = fwd_lanes * lane_w * 0.5
-                    fwd_off  = fwd_half   # décalage positif
+                    fwd_off  = fwd_half
                     tris_fwd.extend(_lane_quad(pos_a, pos_b, fwd_off, fwd_half))
 
-                    # Back lanes — bande rouge de l'autre côté
+                    # Back lanes — red band on the other side
                     if back_lanes > 0:
                         bk_half = back_lanes * lane_w * 0.5
                         bk_off  = -bk_half
                         tris_back.extend(_lane_quad(pos_a, pos_b, bk_off, bk_half))
 
-                # ── LIGNES DE LIENS ─────────────────────────────────────────
+                # ── LINK LINES ──────────────────────────────────────────────
                 pair = [pos_a, pos_b]
                 if is_lk_ped or is_no_nav:
                     lines_ped_lk.extend(pair)
@@ -436,17 +416,17 @@ def _draw_viewport():
                 else:
                     lines_veh.extend(pair)
 
-                # ── FLÈCHES DE DIRECTION ────────────────────────────────────
+                # ── DIRECTION ARROWS ────────────────────────────────────────
                 if not is_lk_ped:
                     arrows.extend(_arrows_along(pos_a, pos_b, spacing=7.0, size=1.8))
 
-        # ── DESSIN ─────────────────────────────────────────────────────────
-        # 1. Overlays de voies (transparents, en premier)
+        # ── DRAWING ────────────────────────────────────────────────────────
+        # 1. Lane overlays (transparent, drawn first)
         if tris_jct:   _batch_tris(shader, tris_jct,  C_JUNCTION)
         if tris_back:  _batch_tris(shader, tris_back, C_BACK_LANE)
         if tris_fwd:   _batch_tris(shader, tris_fwd,  C_FWD_LANE)
 
-        # 2. Lignes de liens
+        # 2. Link lines
         if lines_freeway:  _batch_lines(shader, lines_freeway,  C_FREEWAY,   3.0)
         if lines_veh:      _batch_lines(shader, lines_veh,      C_VEH,       1.5)
         if lines_shortcut: _batch_lines(shader, lines_shortcut, C_SHORTCUT,  1.5)
@@ -455,15 +435,15 @@ def _draw_viewport():
         if lines_ped_lk:   _batch_lines(shader, lines_ped_lk,   C_PED,       1.2)
         if lines_dead:     _batch_lines(shader, lines_dead,      C_DEAD_END, 1.5)
 
-        # 3. Flèches de direction
+        # 3. Direction arrows
         if arrows:         _batch_lines(shader, arrows, C_VEH, 1.2)
 
-        # 4. Noeuds
+        # 4. Nodes
         if pts_ped:  _batch_pts(shader, pts_ped,  C_NODE_PED, 4.0)
         if pts_veh:  _batch_pts(shader, pts_veh,  C_NODE_VEH, 6.0)
         if pts_sel:  _batch_pts(shader, pts_sel,  C_SELECTED, 12.0)
 
-    # ════════════════════════════════════════════════════════════════════════
+    # ══════════════════════════════════════════════════════════════════════
     #  YMT
     # ════════════════════════════════════════════════════════════════════════
     elif active == "YMT" and gp.ymt.show_chain_edges:

@@ -1,7 +1,7 @@
 """
-operators_ymt.py — Scenarios YMT : export natif .ymt XML + gestion arêtes de chaînage.
-Note importante : GTA5 utilise le format XML sérialisé. L'extension de fichier
-sera .ymt.xml pour l'interopérabilité avec les outils de conversion (OpenIV, CodeWalker).
+operators_ymt.py — Scenarios YMT: native .ymt XML export + chaining edge management.
+Note: GTA5 uses a serialized XML format. The file extension is .ymt.xml
+for interoperability with conversion tools (OpenIV, CodeWalker).
 """
 import bpy, math, xml.etree.ElementTree as ET, os
 from bpy.types import Operator
@@ -47,7 +47,7 @@ def _parse_ymt_xml(filepath, props):
         return False, str(e)
     root = tree.getroot()
     if root.tag != "CScenarioPointRegion":
-        return False, f"Racine attendue CScenarioPointRegion, trouvée {root.tag}"
+        return False, f"Expected CScenarioPointRegion root, found {root.tag}"
     props.version_number = ival(root, "VersionNumber", 80)
     points_section = root.find("Points")
     if points_section is not None:
@@ -243,10 +243,10 @@ def _build_ymt_xml(context, props):
     return to_xml_string(root)
 
 
-# ── OPERATEURS ──────────────────────────────────────────────────────────────
+# ── OPERATORS ──────────────────────────────────────────────────────────────────
 
 class YMT_OT_Import(Operator):
-    """Importe un fichier Scenario YMT XML"""
+    """Import a Scenario YMT XML file"""
     bl_idname = "gta5_ymt.import_xml"; bl_label = "Import YMT XML"
     bl_options = {"REGISTER", "UNDO"}
     filepath:   StringProperty(subtype="FILE_PATH")
@@ -261,19 +261,19 @@ class YMT_OT_Import(Operator):
         col = _get_or_create_col(YMT_COLLECTION)
         for obj in list(col.objects): bpy.data.objects.remove(obj, do_unlink=True)
         _build_ymt_objects(props, col)
-        self.report({"INFO"}, f"YMT importé : {props.stat_points} points, {props.stat_nodes} noeuds, {props.stat_edges} arêtes")
+        self.report({"INFO"}, f"YMT imported: {props.stat_points} points, {props.stat_nodes} nodes, {props.stat_edges} edges")
         return {"FINISHED"}
 
 
 class YMT_OT_Export(Operator):
-    """Exporte les scénarios en fichier .ymt XML (compatible OpenIV/CodeWalker)"""
+    """Export scenarios to .ymt XML (OpenIV/CodeWalker compatible)"""
     bl_idname = "gta5_ymt.export_xml"; bl_label = "Export .ymt XML"
     bl_options = {"REGISTER"}
     filepath:   StringProperty(subtype="FILE_PATH")
     filter_glob:StringProperty(default="*.ymt;*.ymt.xml;*.xml", options={"HIDDEN"})
     def invoke(self, context, event):
         props = context.scene.gta5_pathing.ymt
-        # Conserver le même nom de fichier avec extension .ymt.xml
+        # Keep the same filename with .ymt.xml extension
         base = props.filepath or "scenario.ymt.xml"
         if not base.endswith(".ymt.xml") and not base.endswith(".ymt"):
             base = os.path.splitext(base)[0] + ".ymt.xml"
@@ -287,12 +287,12 @@ class YMT_OT_Export(Operator):
         except OSError as e:
             self.report({"ERROR"}, str(e)); return {"CANCELLED"}
         props.filepath = self.filepath
-        self.report({"INFO"}, f"YMT exporté → {self.filepath}")
+        self.report({"INFO"}, f"YMT exported → {self.filepath}")
         return {"FINISHED"}
 
 
 class YMT_OT_AddScenarioPoint(Operator):
-    """Ajoute un point de scénario au curseur"""
+    """Adds a scenario point at the cursor"""
     bl_idname = "gta5_ymt.add_scenario_point"; bl_label = "Add Scenario Point"
     bl_options = {"REGISTER", "UNDO"}
     itype: IntProperty(name="iType", default=1, min=0, max=21)
@@ -319,7 +319,7 @@ class YMT_OT_AddScenarioPoint(Operator):
 
 
 class YMT_OT_RemoveScenarioPoint(Operator):
-    """Supprime le point de scénario sélectionné"""
+    """Removes the selected scenario point"""
     bl_idname = "gta5_ymt.remove_scenario_point"; bl_label = "Remove Point"
     bl_options = {"REGISTER", "UNDO"}
     @classmethod
@@ -335,7 +335,7 @@ class YMT_OT_RemoveScenarioPoint(Operator):
 
 
 class YMT_OT_AddChainingNode(Operator):
-    """Ajoute un noeud de chaînage au curseur"""
+    """Adds a chaining node at the cursor"""
     bl_idname = "gta5_ymt.add_chaining_node"; bl_label = "Add Chaining Node"
     bl_options = {"REGISTER", "UNDO"}
     def execute(self, context):
@@ -356,7 +356,7 @@ class YMT_OT_AddChainingNode(Operator):
 
 
 class YMT_OT_AddChainingEdge(Operator):
-    """Ajoute une arête entre deux noeuds de chaînage"""
+    """Adds an edge between two chaining nodes"""
     bl_idname = "gta5_ymt.add_chaining_edge"; bl_label = "Add Edge"
     bl_options = {"REGISTER", "UNDO"}
     def execute(self, context):
@@ -368,7 +368,7 @@ class YMT_OT_AddChainingEdge(Operator):
 
 
 class YMT_OT_RemoveChainingEdge(Operator):
-    """Supprime l'arête de chaînage sélectionnée"""
+    """Removes the selected chaining edge"""
     bl_idname = "gta5_ymt.remove_chaining_edge"; bl_label = "Remove Edge"
     bl_options = {"REGISTER", "UNDO"}
     @classmethod
@@ -384,7 +384,7 @@ class YMT_OT_RemoveChainingEdge(Operator):
 
 
 class YMT_OT_RemoveAllEdgesFromNode(Operator):
-    """Supprime toutes les arêtes du noeud sélectionné"""
+    """Removes all edges from the selected node"""
     bl_idname = "gta5_ymt.remove_all_edges_node"; bl_label = "Remove Node Edges"
     bl_options = {"REGISTER", "UNDO"}
     @classmethod
@@ -400,12 +400,12 @@ class YMT_OT_RemoveAllEdgesFromNode(Operator):
         for i in reversed(to_remove): props.chaining_edges.remove(i)
         props.chain_edge_index = min(props.chain_edge_index, len(props.chaining_edges) - 1)
         props.stat_edges = len(props.chaining_edges)
-        self.report({"INFO"}, f"{len(to_remove)} arête(s) supprimée(s)")
+        self.report({"INFO"}, f"{len(to_remove)} edge(s) removed")
         return {"FINISHED"}
 
 
 class YMT_OT_SyncFromObjects(Operator):
-    """Synchronise depuis les empties Blender"""
+    """Syncs from Blender empties"""
     bl_idname = "gta5_ymt.sync_from_objects"; bl_label = "Sync from Objects"
     bl_options = {"REGISTER", "UNDO"}
     def execute(self, context):
@@ -422,7 +422,7 @@ class YMT_OT_SyncFromObjects(Operator):
                 idx = obj.get("cn_index", -1)
                 if 0 <= idx < len(props.chaining_nodes):
                     props.chaining_nodes[idx].position = tuple(obj.location); cnt += 1
-        self.report({"INFO"}, f"Sync : {cnt} objets mis à jour")
+        self.report({"INFO"}, f"Synced: {cnt} objects updated")
         return {"FINISHED"}
 
 

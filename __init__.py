@@ -48,7 +48,6 @@ _modules = [
 
 def _start_click_handler():
     """Launch the click-select modal if not already active."""
-    import bpy
     # Check if already active
     wm = bpy.context.window_manager
     if wm and hasattr(wm, "operators"):
@@ -66,7 +65,6 @@ def register():
     for mod in _modules:
         mod.register()
     # Start click handler after short delay
-    import bpy
     bpy.app.timers.register(_start_click_handler, first_interval=0.5)
     print("[GTA5 Pathing Editor] Addon registered.")
 

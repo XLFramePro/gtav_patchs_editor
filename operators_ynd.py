@@ -1,6 +1,6 @@
 """
-operators_ynd.py — PathNodes YND complet avec flags structurés (référence ynd.rar).
-Import/Export XML + gestion complète noeuds/liens + détection automatique ped/véhicule.
+operators_ynd.py — Complete PathNodes YND with structured flags (ynd reference).
+Import/Export XML, full node/link management, auto ped/vehicle detection.
 """
 import bpy, bmesh, xml.etree.ElementTree as ET, math, os
 from bpy.types import Operator
@@ -28,7 +28,7 @@ def _int_to_speed(v):
     return m.get(v & 0xFE, "NORMAL")
 
 def _apply_node_flags(n, f0, f1, f2, f3, f4, f5):
-    """Applique les 6 raw ints dans les PropertyGroups flags structurés."""
+    """Apply 6 raw ints into structured flag PropertyGroups."""
     nf0 = n.flags0
     nf0.scripted        = bool(f0 & 1);   nf0.gps_enabled    = bool(f0 & 2)
     nf0.unused_4        = bool(f0 & 4);   nf0.offroad        = bool(f0 & 8)
@@ -60,12 +60,12 @@ def _apply_node_flags(n, f0, f1, f2, f3, f4, f5):
     nf5.has_junction_heightmap = bool(f5 & 1)
     nf5.speed = _int_to_speed(f5)
 
-    # Stocker raw pour export rapide
+    # Store raw values for fast export
     n.raw0=f0; n.raw1=f1; n.raw2=f2; n.raw3=f3; n.raw4=f4; n.raw5=f5
 
 
 def _node_flags_to_ints(n):
-    """Reconvertit les PropertyGroups en 6 ints pour l'export XML."""
+    """Convert PropertyGroups back to 6 ints for XML export."""
     f0 = n.flags0.to_int()
     f1 = n.flags1.to_int()
     f2 = n.flags2.to_int()
@@ -126,7 +126,7 @@ def _parse_ynd_xml(filepath, props):
         return False, str(e)
     root = tree.getroot()
     if root.tag != "NodeDictionary":
-        return False, f"Racine attendue NodeDictionary, trouvée {root.tag}"
+        return False, f"Expected NodeDictionary root, found {root.tag}"
 
     nodes_el = root.find("Nodes")
     if nodes_el is not None:
@@ -187,6 +187,135 @@ def _find_node_by_area_id(nodes, area_id, node_id):
     return None, None
 
 
+def _next_free_node_id(nodes, area_id):
+    """Return the smallest free node_id for a given area."""
+    used = {int(n.node_id) for n in nodes if int(n.area_id) == int(area_id)}
+    nid = 0
+    while nid in used:
+        nid += 1
+    return nid
+
+
+def _build_node_index_map(nodes):
+    """Map (area_id, node_id) -> node index for stable object syncing."""
+    index_map = {}
+    for i, n in enumerate(nodes):
+        index_map[(int(n.area_id), int(n.node_id))] = i
+    return index_map
+
+
+def _find_node_index_for_object(obj, props, node_index_map):
+    """Resolve node index from object custom props with stable-id fallback."""
+    area = obj.get("node_area_id")
+    node_id = obj.get("node_id")
+    if area is not None and node_id is not None:
+        idx = node_index_map.get((int(area), int(node_id)))
+        if idx is not None:
+            return idx
+
+    idx = obj.get("node_index", -1)
+    if 0 <= idx < len(props.nodes):
+        n = props.nodes[idx]
+        if area is None or node_id is None:
+            return idx
+        if int(n.area_id) == int(area) and int(n.node_id) == int(node_id):
+            return idx
+
+    return -1
+
+
+def _sync_positions_from_node_objects(context, props):
+    """Sync node positions from empties using stable identifiers.
+
+    Returns (synced_count, stale_count).
+    """
+    node_index_map = _build_node_index_map(props.nodes)
+    synced = 0
+    stale = 0
+
+    for obj in context.scene.objects:
+        if obj.get("ynd_type") != "node":
+            continue
+
+        idx = _find_node_index_for_object(obj, props, node_index_map)
+        if idx < 0:
+            stale += 1
+            continue
+
+        node = props.nodes[idx]
+        node.position = tuple(obj.location)
+
+        # Keep custom properties aligned for future operations.
+        obj["node_index"] = idx
+        obj["node_area_id"] = node.area_id
+        obj["node_id"] = node.node_id
+        synced += 1
+
+    return synced, stale
+
+
+def _prune_invalid_local_links(props):
+    """Remove links that target missing nodes in the same AreaID.
+
+    External links (to other AreaID values) are preserved.
+    Returns number of removed links.
+    """
+    removed = 0
+    node_ids_by_area = {}
+    for n in props.nodes:
+        node_ids_by_area.setdefault(int(n.area_id), set()).add(int(n.node_id))
+
+    for n in props.nodes:
+        local_ids = node_ids_by_area.get(int(n.area_id), set())
+        bad_indices = [
+            i for i, lk in enumerate(n.links)
+            if int(lk.to_area_id) == int(n.area_id) and int(lk.to_node_id) not in local_ids
+        ]
+        for i in reversed(bad_indices):
+            n.links.remove(i)
+            removed += 1
+
+    return removed
+
+
+def _remove_links_targeting_node(props, area_id, node_id):
+    """Remove every link in props that targets (area_id, node_id)."""
+    removed = 0
+    for n in props.nodes:
+        idxs = [
+            i for i, lk in enumerate(n.links)
+            if int(lk.to_area_id) == int(area_id) and int(lk.to_node_id) == int(node_id)
+        ]
+        for i in reversed(idxs):
+            n.links.remove(i)
+            removed += 1
+    return removed
+
+
+def _repair_duplicate_local_ids(props):
+    """Ensure node_id uniqueness per area by reassigning duplicate IDs.
+
+    Returns number of changed node IDs.
+    """
+    used_by_area = {}
+    changed = 0
+
+    for n in props.nodes:
+        area = int(n.area_id)
+        nid = int(n.node_id)
+        used = used_by_area.setdefault(area, set())
+        if nid in used:
+            new_id = 0
+            while new_id in used:
+                new_id += 1
+            n.node_id = new_id
+            nid = new_id
+            changed += 1
+        used.add(nid)
+
+    return changed
+
+
 def _build_ynd_link_objects(props, col):
     root_links = bpy.data.objects.new("YND_Links", None)
     root_links.empty_display_type = "PLAIN_AXES"
@@ -218,6 +347,22 @@ def _build_ynd_link_objects(props, col):
     return root_links
 
 
+def _refresh_ynd_link_objects(props):
+    """Rebuild visual link objects from current props state."""
+    col = bpy.data.collections.get(YND_COLLECTION)
+    if col is None:
+        return
+
+    for obj in list(col.objects):
+        if obj.get("ynd_type") in {"link", "links_root"}:
+            bpy.data.objects.remove(obj, do_unlink=True)
+
+    links_root = _build_ynd_link_objects(props, col)
+    root_obj = next((o for o in col.objects if o.get("ynd_type") == "root"), None)
+    if root_obj is not None:
+        links_root.parent = root_obj
+
+
 def _build_ynd_objects(props, col):
     root_obj = bpy.data.objects.new("YND_Root", None)
     root_obj.empty_display_type = "PLAIN_AXES"
@@ -231,7 +376,7 @@ def _build_ynd_objects(props, col):
             f"YND_{'V' if is_veh else 'P'}_{node.area_id}_{node.node_id}_{node.street_name or 'unnamed'}",
             None
         )
-        # Cubes pour véhicules, sphères pour piétons (comme dans la référence)
+        # Cubes for vehicles, spheres for pedestrians
         obj.empty_display_type = "CUBE" if is_veh else "SPHERE"
         obj.empty_display_size = 0.5 if is_veh else 0.3
         obj.location = node.position
@@ -258,12 +403,9 @@ def _build_ynd_objects(props, col):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _build_ynd_xml(context, props):
-    # Sync positions depuis les empties
-    for obj in context.scene.objects:
-        if obj.get("ynd_type") == "node":
-            idx = obj.get("node_index", -1)
-            if 0 <= idx < len(props.nodes):
-                props.nodes[idx].position = tuple(obj.location)
+    # Sync positions from empties with stable IDs.
+    _sync_positions_from_node_objects(context, props)
+    _prune_invalid_local_links(props)
 
     root = ET.Element("NodeDictionary")
     sub_val(root, "VehicleNodeCount", sum(1 for n in props.nodes if _node_is_vehicle(n)))
@@ -302,7 +444,7 @@ def _build_ynd_xml(context, props):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class YND_OT_Import(Operator):
-    """Importe un fichier PathNodes YND XML"""
+    """Import a PathNodes YND XML file"""
     bl_idname = "gta5_ynd.import_xml"; bl_label = "Import YND XML"
     bl_options = {"REGISTER", "UNDO"}
     filepath:   StringProperty(subtype="FILE_PATH")
@@ -318,13 +460,13 @@ class YND_OT_Import(Operator):
         for obj in list(col.objects): bpy.data.objects.remove(obj, do_unlink=True)
         _build_ynd_objects(props, col)
         self.report({"INFO"},
-            f"YND importé : {props.stat_vehicle} véhicules, "
-            f"{props.stat_ped} piétons, {props.stat_junctions} carrefours")
+            f"YND imported: {props.stat_vehicle} vehicle, "
+            f"{props.stat_ped} ped, {props.stat_junctions} junctions")
         return {"FINISHED"}
 
 
 class YND_OT_Export(Operator):
-    """Exporte les PathNodes en YND XML"""
+    """Export PathNodes to YND XML"""
     bl_idname = "gta5_ynd.export_xml"; bl_label = "Export YND XML"
     bl_options = {"REGISTER"}
     filepath:   StringProperty(subtype="FILE_PATH")
@@ -341,22 +483,22 @@ class YND_OT_Export(Operator):
         except OSError as e:
             self.report({"ERROR"}, str(e)); return {"CANCELLED"}
         props.filepath = self.filepath
-        self.report({"INFO"}, f"YND exporté → {self.filepath}")
+        self.report({"INFO"}, f"YND exported → {self.filepath}")
         return {"FINISHED"}
 
 
 class YND_OT_AddVehicleNode(Operator):
-    """Ajoute un noeud véhicule au curseur 3D"""
+    """Adds a vehicle node at the 3D cursor"""
     bl_idname = "gta5_ynd.add_vehicle_node"; bl_label = "Add Vehicle Node"
     bl_options = {"REGISTER", "UNDO"}
     def execute(self, context):
         props = context.scene.gta5_pathing.ynd
         n = props.nodes.add()
-        n.node_id    = len(props.nodes) - 1
         n.area_id    = props.area_id
+        n.node_id    = _next_free_node_id(props.nodes, n.area_id)
         cursor       = context.scene.cursor.location
         n.position   = (cursor.x, cursor.y, cursor.z)
-        # Flags par défaut véhicule : Normal speed, GPS enabled
+        # Default vehicle flags: Normal speed, GPS enabled
         _apply_node_flags(n, 2, 0, 0, 64, 134, 2)
         props.node_index   = len(props.nodes) - 1
         props.stat_nodes   = len(props.nodes)
@@ -370,22 +512,22 @@ class YND_OT_AddVehicleNode(Operator):
         obj["node_area_id"]=n.area_id; obj["node_id"]=n.node_id
         obj["is_vehicle"]=True; obj["is_freeway"]=False; obj["is_junction"]=False
         _link_obj(obj, col)
-        self.report({"INFO"}, f"Noeud véhicule ajouté : {n.area_id}:{n.node_id}")
+        self.report({"INFO"}, f"Vehicle node added: {n.area_id}:{n.node_id}")
         return {"FINISHED"}
 
 
 class YND_OT_AddPedNode(Operator):
-    """Ajoute un noeud piéton au curseur 3D"""
+    """Adds a pedestrian node at the 3D cursor"""
     bl_idname = "gta5_ynd.add_ped_node"; bl_label = "Add Pedestrian Node"
     bl_options = {"REGISTER", "UNDO"}
     def execute(self, context):
         props = context.scene.gta5_pathing.ynd
         n = props.nodes.add()
-        n.node_id  = len(props.nodes) - 1
         n.area_id  = props.area_id
+        n.node_id  = _next_free_node_id(props.nodes, n.area_id)
         cursor     = context.scene.cursor.location
         n.position = (cursor.x, cursor.y, cursor.z)
-        # flags1 avec special_type PED_CROSSING (valeur 10 << 3 = 80)
+        # flags1 with special_type PED_CROSSING (value 10 << 3 = 80)
         _apply_node_flags(n, 2, 80, 0, 8, 2, 2)
         props.node_index   = len(props.nodes) - 1
         props.stat_nodes   = len(props.nodes)
@@ -399,12 +541,12 @@ class YND_OT_AddPedNode(Operator):
         obj["node_area_id"]=n.area_id; obj["node_id"]=n.node_id
         obj["is_vehicle"]=False; obj["is_freeway"]=False; obj["is_junction"]=False
         _link_obj(obj, col)
-        self.report({"INFO"}, f"Noeud piéton ajouté : {n.area_id}:{n.node_id}")
+        self.report({"INFO"}, f"Pedestrian node added: {n.area_id}:{n.node_id}")
         return {"FINISHED"}
 
 
 class YND_OT_RemoveNode(Operator):
-    """Supprime le noeud actif + tous ses liens entrants dans les autres noeuds"""
+    """Removes active node and all incoming links from other nodes"""
     bl_idname = "gta5_ynd.remove_node"; bl_label = "Remove Node"
     bl_options = {"REGISTER", "UNDO"}
     @classmethod
@@ -416,22 +558,46 @@ class YND_OT_RemoveNode(Operator):
         idx   = props.node_index
         node  = props.nodes[idx]
         r_area, r_id = node.area_id, node.node_id
-        # Supprimer les liens entrants dans tous les autres noeuds
-        for n in props.nodes:
-            idxs = [i for i, lk in enumerate(n.links)
-                    if lk.to_area_id == r_area and lk.to_node_id == r_id]
-            for i in reversed(idxs): n.links.remove(i)
+
+        # Remove corresponding node empties to prevent stale sync mappings.
+        to_remove = [
+            obj for obj in context.scene.objects
+            if obj.get("ynd_type") == "node"
+            and int(obj.get("node_area_id", -1)) == int(r_area)
+            and int(obj.get("node_id", -1)) == int(r_id)
+        ]
+        for obj in to_remove:
+            bpy.data.objects.remove(obj, do_unlink=True)
+
+        # Remove every reference to deleted node from remaining nodes.
+        removed_links = _remove_links_targeting_node(props, r_area, r_id)
         props.nodes.remove(idx)
+        # Safety pass after removal to catch any stale references.
+        removed_links += _remove_links_targeting_node(props, r_area, r_id)
+        _prune_invalid_local_links(props)
+
+        # Reindex remaining node empties.
+        node_index_map = _build_node_index_map(props.nodes)
+        for obj in context.scene.objects:
+            if obj.get("ynd_type") != "node":
+                continue
+            mapped_idx = _find_node_index_for_object(obj, props, node_index_map)
+            if mapped_idx >= 0:
+                obj["node_index"] = mapped_idx
+
         props.node_index   = min(idx, len(props.nodes) - 1)
         props.stat_nodes   = len(props.nodes)
         props.stat_vehicle = sum(1 for n in props.nodes if _node_is_vehicle(n))
         props.stat_ped     = sum(1 for n in props.nodes if not _node_is_vehicle(n))
         props.stat_junctions = sum(1 for n in props.nodes if _node_is_junction(n))
+
+        _refresh_ynd_link_objects(props)
+        self.report({"INFO"}, f"Node removed: {r_area}:{r_id} ({removed_links} link(s) removed)")
         return {"FINISHED"}
 
 
 class YND_OT_AddLink(Operator):
-    """Ajoute un lien sortant au noeud actif"""
+    """Adds an outgoing link to the active node"""
     bl_idname = "gta5_ynd.add_link"; bl_label = "Add Link"
     bl_options = {"REGISTER", "UNDO"}
     @classmethod
@@ -446,11 +612,12 @@ class YND_OT_AddLink(Operator):
         lk.to_node_id  = 0
         lk.link_length = 10
         node.link_index = len(node.links) - 1
+        _refresh_ynd_link_objects(props)
         return {"FINISHED"}
 
 
 class YND_OT_RemoveLink(Operator):
-    """Supprime le lien actif du noeud"""
+    """Removes the active link from the node"""
     bl_idname = "gta5_ynd.remove_link"; bl_label = "Remove Link"
     bl_options = {"REGISTER", "UNDO"}
     @classmethod
@@ -463,11 +630,12 @@ class YND_OT_RemoveLink(Operator):
         node  = props.nodes[props.node_index]
         node.links.remove(node.link_index)
         node.link_index = min(node.link_index, len(node.links) - 1)
+        _refresh_ynd_link_objects(props)
         return {"FINISHED"}
 
 
 class YND_OT_RemoveAllLinks(Operator):
-    """Supprime TOUS les liens du noeud actif"""
+    """Removes ALL links from the active node"""
     bl_idname = "gta5_ynd.remove_all_links"; bl_label = "Remove All Links"
     bl_options = {"REGISTER", "UNDO"}
     @classmethod
@@ -481,17 +649,18 @@ class YND_OT_RemoveAllLinks(Operator):
         node  = props.nodes[props.node_index]
         count = len(node.links)
         node.links.clear(); node.link_index = -1
-        self.report({"INFO"}, f"{count} lien(s) supprimé(s)")
+        _refresh_ynd_link_objects(props)
+        self.report({"INFO"}, f"{count} link(s) removed")
         return {"FINISHED"}
 
 
 class YND_OT_LinkTwoNodes(Operator):
-    """Crée un lien du noeud actif vers un noeud cible"""
+    """Creates a link from the active node to a target node"""
     bl_idname = "gta5_ynd.link_two_nodes"; bl_label = "Link to Target Node"
     bl_options = {"REGISTER", "UNDO"}
-    target_node_id: IntProperty(name="Node ID cible", default=0, min=0)
-    target_area_id: IntProperty(name="Area ID cible", default=400, min=0)
-    bidirectional:  BoolProperty(name="Bidirectionnel", default=True)
+    target_node_id: IntProperty(name="Target Node ID", default=0, min=0)
+    target_area_id: IntProperty(name="Target Area ID", default=400, min=0)
+    bidirectional:  BoolProperty(name="Bidirectional", default=True)
     @classmethod
     def poll(cls, context):
         p = context.scene.gta5_pathing.ynd
@@ -515,23 +684,49 @@ class YND_OT_LinkTwoNodes(Operator):
             lk2.to_area_id  = src.area_id
             lk2.to_node_id  = src.node_id
             lk2.link_length = dist
-        self.report({"INFO"}, f"Lien {'↔' if self.bidirectional else '→'} créé, L={dist}")
+        _refresh_ynd_link_objects(props)
+        self.report({"INFO"}, f"Link {'↔' if self.bidirectional else '→'} created, L={dist}")
         return {"FINISHED"}
 
 
 class YND_OT_SyncFromObjects(Operator):
-    """Synchronise les positions depuis les empties Blender"""
+    """Syncs node positions from Blender empties"""
     bl_idname = "gta5_ynd.sync_from_objects"; bl_label = "Sync from Objects"
     bl_options = {"REGISTER", "UNDO"}
     def execute(self, context):
         props = context.scene.gta5_pathing.ynd
-        count = 0
+        count, stale = _sync_positions_from_node_objects(context, props)
+        msg = f"{count} nodes synced"
+        if stale:
+            msg += f" ({stale} stale object(s) ignored)"
+        self.report({"INFO"}, msg)
+        return {"FINISHED"}
+
+
+class YND_OT_RepairLocalIds(Operator):
+    """Repairs duplicate node IDs in current YND and cleans local invalid links"""
+    bl_idname = "gta5_ynd.repair_local_ids"; bl_label = "Repair Local IDs"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        props = context.scene.gta5_pathing.ynd
+        changed = _repair_duplicate_local_ids(props)
+        removed = _prune_invalid_local_links(props)
+
+        # Refresh node object custom properties.
         for obj in context.scene.objects:
-            if obj.get("ynd_type") == "node":
-                idx = obj.get("node_index", -1)
-                if 0 <= idx < len(props.nodes):
-                    props.nodes[idx].position = tuple(obj.location); count += 1
-        self.report({"INFO"}, f"{count} noeuds synchronisés")
+            if obj.get("ynd_type") != "node":
+                continue
+            idx = obj.get("node_index", -1)
+            if 0 <= idx < len(props.nodes):
+                n = props.nodes[idx]
+                obj["node_area_id"] = n.area_id
+                obj["node_id"] = n.node_id
+
+        _refresh_ynd_link_objects(props)
+
+        msg = f"Repair done: {changed} duplicate ID(s) fixed, {removed} local invalid link(s) removed"
+        self.report({"INFO"}, msg)
         return {"FINISHED"}
 
 
@@ -539,7 +734,7 @@ _classes = [
     YND_OT_Import, YND_OT_Export,
     YND_OT_AddVehicleNode, YND_OT_AddPedNode, YND_OT_RemoveNode,
     YND_OT_AddLink, YND_OT_RemoveLink, YND_OT_RemoveAllLinks,
-    YND_OT_LinkTwoNodes, YND_OT_SyncFromObjects,
+    YND_OT_LinkTwoNodes, YND_OT_SyncFromObjects, YND_OT_RepairLocalIds,
 ]
 
 def register():

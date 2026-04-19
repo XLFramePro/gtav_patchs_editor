@@ -230,7 +230,7 @@ class YND_LinkItem(PropertyGroup):
     flags0:      PointerProperty(type=YND_LinkFlags0, name="Flags 0")
     flags1:      PointerProperty(type=YND_LinkFlags1, name="Flags 1")
     flags2:      PointerProperty(type=YND_LinkFlags2, name="Flags 2")
-    # Compatibilité raw (pour import/export rapide)
+    # Raw values for fast import/export
     raw_flags0:  IntProperty(default=0, min=0, max=255)
     raw_flags1:  IntProperty(default=0, min=0, max=255)
     raw_flags2:  IntProperty(default=0, min=0, max=255)
@@ -240,7 +240,7 @@ class YND_LinkItem(PropertyGroup):
 class YND_NodeItem(PropertyGroup):
     area_id:    IntProperty(name="Area ID",  default=400)
     node_id:    IntProperty(name="Node ID",  default=0)
-    street_name:StringProperty(name="Rue",   default="")
+    street_name:StringProperty(name="Street",   default="")
     position:   FloatVectorProperty(name="Position", size=3, default=(0,0,0), precision=5)
     flags0:     PointerProperty(type=YND_NodeFlags0, name="Flags 0")
     flags1:     PointerProperty(type=YND_NodeFlags1, name="Flags 1")
@@ -249,7 +249,7 @@ class YND_NodeItem(PropertyGroup):
     flags4:     PointerProperty(type=YND_NodeFlags4, name="Flags 4")
     flags5:     PointerProperty(type=YND_NodeFlags5, name="Flags 5")
     junction:   PointerProperty(type=YND_JunctionProps, name="Junction")
-    # raw ints pour compatibilité I/O
+    # Raw ints for I/O compatibility
     raw0:  IntProperty(default=2,   min=0, max=255)
     raw1:  IntProperty(default=0,   min=0, max=255)
     raw2:  IntProperty(default=0,   min=0, max=255)
@@ -265,17 +265,17 @@ class YND_NodeItem(PropertyGroup):
 
 
 class YND_Props(PropertyGroup):
-    filepath:           StringProperty(name="Fichier", subtype="FILE_PATH", default="")
+    filepath:           StringProperty(name="File", subtype="FILE_PATH", default="")
     area_id:            IntProperty(name="Area ID", default=400)
     vehicle_node_count: IntProperty(default=0)
     ped_node_count:     IntProperty(default=0)
     nodes:              CollectionProperty(type=YND_NodeItem)
     node_index:         IntProperty(default=-1)
-    show_vehicle:       BoolProperty(name="Véhicules",  default=True)
-    show_ped:           BoolProperty(name="Piétons",    default=True)
-    show_links:         BoolProperty(name="Liens",      default=True)
-    show_junctions:     BoolProperty(name="Carrefours", default=True)
-    filter_street:      StringProperty(name="Rue", default="")
+    show_vehicle:       BoolProperty(name="Vehicles",  default=True)
+    show_ped:           BoolProperty(name="Pedestrians",    default=True)
+    show_links:         BoolProperty(name="Links",      default=True)
+    show_junctions:     BoolProperty(name="Junctions", default=True)
+    filter_street:      StringProperty(name="Street", default="")
     stat_nodes:         IntProperty(default=0)
     stat_vehicle:       IntProperty(default=0)
     stat_ped:           IntProperty(default=0)
@@ -371,7 +371,7 @@ class YNV_NavPointItem(PropertyGroup):
 
 
 class YNV_Props(PropertyGroup):
-    filepath:      StringProperty(name="Fichier", subtype="FILE_PATH", default="")
+    filepath:      StringProperty(name="File", subtype="FILE_PATH", default="")
     area_id:       IntProperty(name="Area ID", default=0)
     content_flags: StringProperty(name="ContentFlags", default="Polygons, Portals")
     bb_min:        FloatVectorProperty(name="BB Min", size=3, default=(0,0,0))
@@ -382,18 +382,18 @@ class YNV_Props(PropertyGroup):
     nav_point_index:    IntProperty(default=-1)
     selected_poly_flags:PointerProperty(type=YNV_PolyFlagsItem)
     flag_preset: EnumProperty(
-        name="Préset Flags",
+        name="Flag Preset",
         items=[
-            ("ROAD","Route","Route"),("PAVEMENT","Trottoir","Trottoir"),
-            ("INTERIOR","Intérieur","Intérieur"),("WATER","Eau","Eau"),
-            ("SHALLOW","Eau peu prof.","Shallow"),("TRAIN","Voie ferrée","Train"),
-            ("COVER","Couverture","Cover"),("SPAWN","Zone spawn","Spawn"),("CUSTOM","Personnalisé","Custom"),
+            ("ROAD","Road","Road"),("PAVEMENT","Pavement","Pavement"),
+            ("INTERIOR","Interior","Interior"),("WATER","Water","Water"),
+            ("SHALLOW","Shallow","Shallow"),("TRAIN","Train Track","Train"),
+            ("COVER","Cover","Cover"),("SPAWN","Spawn Zone","Spawn"),("CUSTOM","Custom","Custom"),
         ],
         default="ROAD",
     )
-    filter_flag:    EnumProperty(name="Filtre", items=[("NONE","Tous","")], default="NONE")
-    show_polygons:  BoolProperty(name="Polygones",  default=True)
-    show_portals:   BoolProperty(name="Portails",   default=True)
+    filter_flag:    EnumProperty(name="Filter", items=[("NONE","All","")], default="NONE")
+    show_polygons:  BoolProperty(name="Polygons",  default=True)
+    show_portals:   BoolProperty(name="Portals",   default=True)
     show_navpoints: BoolProperty(name="Nav Points", default=True)
     stat_polygons:  IntProperty(default=0)
     stat_portals:   IntProperty(default=0)
@@ -412,42 +412,42 @@ class YMT_ScenarioPointItem(PropertyGroup):
     model_set_id:     IntProperty(name="ModelSet ID", default=0)
     interior_id:      IntProperty(name="Interior ID", default=0)
     imap_id:          IntProperty(name="IMap ID",     default=0)
-    probability:      IntProperty(name="Probabilité", default=0, min=0, max=255)
+    probability:      IntProperty(name="Probability", default=0, min=0, max=255)
     avail_mp_sp:      IntProperty(name="MP/SP",       default=1, min=0, max=3)
-    time_start:       IntProperty(name="Heure début", default=0, min=0, max=23)
-    time_end:         IntProperty(name="Heure fin",   default=24,min=0, max=24)
-    radius:           IntProperty(name="Rayon",       default=0)
-    time_till_leaves: IntProperty(name="Temps départ",default=255,min=0,max=255)
-    scenario_group:   IntProperty(name="Groupe",      default=0)
+    time_start:       IntProperty(name="Time Start", default=0, min=0, max=23)
+    time_end:         IntProperty(name="Time End",   default=24,min=0, max=24)
+    radius:           IntProperty(name="Radius",       default=0)
+    time_till_leaves: IntProperty(name="Time Till Leaves",default=255,min=0,max=255)
+    scenario_group:   IntProperty(name="Group",      default=0)
     flags:            StringProperty(name="Flags",    default="")
     position:         FloatVectorProperty(name="Position XYZW", size=4, default=(0,0,0,0))
 
 class YMT_ChainingNodeItem(PropertyGroup):
     position:      FloatVectorProperty(name="Position", size=3, default=(0,0,0))
-    scenario_type: StringProperty(name="Type Scénario", default="standing")
-    has_incoming:  BoolProperty(name="Entrant",  default=False)
-    has_outgoing:  BoolProperty(name="Sortant",  default=True)
+    scenario_type: StringProperty(name="Scenario Type", default="standing")
+    has_incoming:  BoolProperty(name="Incoming",  default=False)
+    has_outgoing:  BoolProperty(name="Outgoing",  default=True)
     hash_prop:     StringProperty(name="hash_9B1D60AB", default="")
 
 class YMT_ChainingEdgeItem(PropertyGroup):
-    node_from: IntProperty(name="De",      default=0, min=0)
-    node_to:   IntProperty(name="À",       default=0, min=0)
+    node_from: IntProperty(name="From",      default=0, min=0)
+    node_to:   IntProperty(name="To",       default=0, min=0)
     action:    IntProperty(name="Action",  default=0)
     nav_mode:  IntProperty(name="NavMode", default=1)
-    nav_speed: IntProperty(name="Vitesse", default=2)
+    nav_speed: IntProperty(name="Speed", default=2)
 
 class YMT_ChainItem(PropertyGroup):
-    hash_name: StringProperty(name="Nom hash", default="")
+    hash_name: StringProperty(name="Hash Name", default="")
     edge_ids:  StringProperty(name="Edge IDs", default="")
 
 class YMT_EntityOverrideItem(PropertyGroup):
-    entity_type:     StringProperty(name="Type Entité",   default="")
+    entity_type:     StringProperty(name="Entity Type",   default="")
     entity_position: FloatVectorProperty(name="Position", size=3, default=(0,0,0))
     may_not_exist:   BoolProperty(name="May Not Exist",   default=True)
     prevent_art:     BoolProperty(name="Prevent Art",     default=False)
 
 class YMT_Props(PropertyGroup):
-    filepath:       StringProperty(name="Fichier", subtype="FILE_PATH", default="")
+    filepath:       StringProperty(name="File", subtype="FILE_PATH", default="")
     version_number: IntProperty(name="Version", default=80)
     scenario_points:       CollectionProperty(type=YMT_ScenarioPointItem)
     point_index:           IntProperty(default=-1)
@@ -465,10 +465,10 @@ class YMT_Props(PropertyGroup):
     accel_min_cell_x:IntProperty(default=-4); accel_max_cell_x:IntProperty(default=5)
     accel_min_cell_y:IntProperty(default=-64); accel_max_cell_y:IntProperty(default=-48)
     accel_cell_dim_x:IntProperty(default=32); accel_cell_dim_y:IntProperty(default=32)
-    show_scenario_pts:BoolProperty(name="Points Scénario", default=True)
-    show_chain_nodes: BoolProperty(name="Noeuds Chaînage", default=True)
-    show_chain_edges: BoolProperty(name="Arêtes",          default=True)
-    filter_type:    EnumProperty(name="Filtre", items=[("ALL","Tous","")], default="ALL")
+    show_scenario_pts:BoolProperty(name="Scenario Points", default=True)
+    show_chain_nodes: BoolProperty(name="Chaining Nodes", default=True)
+    show_chain_edges: BoolProperty(name="Edges",          default=True)
+    filter_type:    EnumProperty(name="Filter", items=[("ALL","All","")], default="ALL")
     stat_points:    IntProperty(default=0)
     stat_nodes:     IntProperty(default=0)
     stat_edges:     IntProperty(default=0)
@@ -484,15 +484,15 @@ class TRAINS_TrackPointItem(PropertyGroup):
     flag:     IntProperty(name="Flag", default=0, min=0, max=5)
 
 class TRAINS_Props(PropertyGroup):
-    filepath:       StringProperty(name="Fichier", subtype="FILE_PATH", default="")
-    track_name:     StringProperty(name="Nom piste", default="trains4")
+    filepath:       StringProperty(name="File", subtype="FILE_PATH", default="")
+    track_name:     StringProperty(name="Track Name", default="trains4")
     points:         CollectionProperty(type=TRAINS_TrackPointItem)
     point_index:    IntProperty(default=-1)
-    show_track:     BoolProperty(name="Voie",        default=True)
-    show_junctions: BoolProperty(name="Aiguillages", default=True)
+    show_track:     BoolProperty(name="Track",        default=True)
+    show_junctions: BoolProperty(name="Junctions", default=True)
     stat_points:    IntProperty(default=0)
     stat_junctions: IntProperty(default=0)
-    use_curve_gen:  BoolProperty(name="Générer courbe Blender", default=True)
+    use_curve_gen:  BoolProperty(name="Generate Blender Curve", default=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -503,10 +503,10 @@ class GTA5_PathingProps(PropertyGroup):
     active_module: EnumProperty(
         name="Module",
         items=[
-            ("YNV",    "NavMesh (YNV)",   "Navmesh piéton/véhicule", "MOD_FLUID",    0),
-            ("YND",    "PathNodes (YND)", "Noeuds de chemin",         "EMPTY_ARROWS", 1),
-            ("YMT",    "Scenarios (YMT)", "Points de scénario",       "ARMATURE_DATA",2),
-            ("TRAINS", "Train Tracks",    "Voies de train",           "CURVE_PATH",   3),
+            ("YNV",    "NavMesh (YNV)",   "Pedestrian/Vehicle NavMesh", "MOD_FLUID",    0),
+            ("YND",    "PathNodes (YND)", "Path Nodes",         "EMPTY_ARROWS", 1),
+            ("YMT",    "Scenarios (YMT)", "Scenario Points",       "ARMATURE_DATA",2),
+            ("TRAINS", "Train Tracks",    "Train Tracks",           "CURVE_PATH",   3),
         ],
         default="YNV",
     )
