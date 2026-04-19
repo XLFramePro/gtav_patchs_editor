@@ -129,6 +129,9 @@ def _get_or_create_material(b0, b1, b2, b3):
     if hasattr(mat, "blend_method"):
         mat.blend_method = "BLEND"
 
+    # Set viewport color for solid mode visibility
+    mat.diffuse_color = color
+
     # Stocker les flags dans les custom props du matériau
     mat["ynv_b0"] = b0; mat["ynv_b1"] = b1
     mat["ynv_b2"] = b2; mat["ynv_b3"] = b3
