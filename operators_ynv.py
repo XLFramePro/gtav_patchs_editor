@@ -672,6 +672,24 @@ def _poly_portal_links_valid(portal_links, portal_count):
     return True
 
 
+def _normalize_poly_portal_links(poly_portal_links, poly_count):
+    """Align per-face portal link cache length with polygon count."""
+    if not isinstance(poly_portal_links, list):
+        poly_portal_links = []
+
+    # Force each face entry to be a list.
+    normalized = []
+    for entry in poly_portal_links:
+        normalized.append(entry if isinstance(entry, list) else [])
+
+    if len(normalized) < poly_count:
+        normalized.extend([[] for _ in range(poly_count - len(normalized))])
+    elif len(normalized) > poly_count:
+        normalized = normalized[:poly_count]
+
+    return normalized
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  EXPORT XML
 # ─────────────────────────────────────────────────────────────────────────────
@@ -739,8 +757,8 @@ def _build_ynv_xml(context, props):
             poly_portal_links = json.loads(poly_obj.get("ynv_poly_portals", "[]"))
         except Exception:
             poly_portal_links = []
-        if not isinstance(poly_portal_links, list):
-            poly_portal_links = []
+
+        poly_portal_links = _normalize_poly_portal_links(poly_portal_links, poly_count)
 
         # If polygon topology has changed (face delete/add), stale edge cache can become invalid.
         # Fallback to regenerated per-face edges in that case.
@@ -748,8 +766,6 @@ def _build_ynv_xml(context, props):
             edge_lines = []
         if len(edge_flag_lines) != poly_count:
             edge_flag_lines = []
-        if len(poly_portal_links) != poly_count:
-            poly_portal_links = []
 
         # Keep bytes4/5/6 array aligned with face count.
         if len(b456_data) < poly_count:
@@ -800,8 +816,15 @@ def _build_ynv_xml(context, props):
                 final_edge_flags = ["0:0, 0:0" for _ in range(len(final_edges))]
             edges_flags_el.text = "\n" + "\n".join([f"    {ln}" for ln in final_edge_flags]) + "\n   "
 
-            if i < len(poly_portal_links) and _poly_portal_links_valid(poly_portal_links[i], len(props.portals)):
-                links = [str(int(v)) for v in poly_portal_links[i]]
+            if i < len(poly_portal_links):
+                links = []
+                for raw in poly_portal_links[i]:
+                    try:
+                        idx = int(raw)
+                    except Exception:
+                        continue
+                    if 0 <= idx < len(props.portals):
+                        links.append(str(idx))
                 if links:
                     p_el = ET.SubElement(item, "Portals")
                     p_el.text = "\n" + "\n".join([f"    {v}" for v in links]) + "\n   "
@@ -1106,6 +1129,15 @@ class YNV_OT_AddPolygon(Operator):
             b456_data = []
         b456_data.append([0, 0, 0])
         poly_obj["ynv_bytes456"] = json.dumps(b456_data)
+
+        try:
+            poly_portals = json.loads(poly_obj.get("ynv_poly_portals", "[]"))
+        except Exception:
+            poly_portals = []
+        if not isinstance(poly_portals, list):
+            poly_portals = []
+        poly_portals.append([])
+        poly_obj["ynv_poly_portals"] = json.dumps(poly_portals)
 
         props.stat_polygons = len(mesh.polygons)
         labels = " + ".join(_flag_label_parts(b0, b1, b2, b3))
