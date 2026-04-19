@@ -306,7 +306,7 @@ def _draw_viewport():
             try:
                 node_ped[key]  = node.flags1.special_type in PED_TYPES
                 node_free[key] = node.flags2.freeway
-            except Exception:
+            except AttributeError:
                 node_ped[key]  = False
                 node_free[key] = False
 
@@ -338,7 +338,7 @@ def _draw_viewport():
                 is_fwy = node.flags2.freeway
                 is_jct = node.flags2.junction
                 speed  = node.flags5.speed
-            except Exception:
+            except AttributeError:
                 is_ped = False; is_fwy = False; is_jct = False; speed = "NORMAL"
 
             # Classer le noeud
@@ -373,7 +373,7 @@ def _draw_viewport():
                     is_shortcut = lk.flags2.shortcut
                     is_no_nav   = lk.flags2.dont_use_for_navigation
                     is_narrow   = lk.flags1.narrow_road
-                except Exception:
+                except AttributeError:
                     fwd_lanes=1; back_lanes=0; is_dead=False
                     is_shortcut=False; is_no_nav=False; is_narrow=False
 
@@ -381,7 +381,7 @@ def _draw_viewport():
                 is_lk_fwy  = is_fwy or node_free.get(key_b, False)
                 try:
                     is_parking = node.flags1.special_type == "PARKING"
-                except Exception:
+                except AttributeError:
                     is_parking = False
 
                 # ── OVERLAYS DE VOIES ───────────────────────────────────────

@@ -124,14 +124,17 @@ def _get_or_create_material(b0, b1, b2, b3):
 
 
 def _parse_flags_str(flags_str):
-    """Convert '0 128 2 0 161 164' → (b0, b1, b2, b3, b4, b5)."""
+    """Convert raw flag string to 7 bytes: b0..b6.
+
+    CodeWalker accepts 7 bytes for YNV polygon flags.
+    """
     try:
         parts = [int(x) for x in flags_str.split()]
-        while len(parts) < 6:
+        while len(parts) < 7:
             parts.append(0)
-        return parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]
+        return parts[0], parts[1], parts[2], parts[3], parts[4], parts[5], parts[6]
     except Exception:
-        return 0, 0, 0, 0, 0, 0
+        return 0, 0, 0, 0, 0, 0, 0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -184,7 +187,29 @@ def _parse_ynv_xml(filepath, props):
                 for line in edges_el.text.strip().split("\n"):
                     if line.strip():
                         edges_raw.append(line.strip())
-            polygons_data.append({"flags": flags_str, "verts": verts, "edges": edges_raw})
+            edges_flags_el = item.find("EdgesFlags")
+            edges_flags_raw = []
+            if edges_flags_el is not None and edges_flags_el.text:
+                for line in edges_flags_el.text.strip().split("\n"):
+                    if line.strip():
+                        edges_flags_raw.append(line.strip())
+
+            portals_poly_el = item.find("Portals")
+            portals_poly_raw = []
+            if portals_poly_el is not None and portals_poly_el.text:
+                for tok in portals_poly_el.text.replace("\n", " ").replace(",", " ").split():
+                    try:
+                        portals_poly_raw.append(int(tok))
+                    except ValueError:
+                        pass
+
+            polygons_data.append({
+                "flags": flags_str,
+                "verts": verts,
+                "edges": edges_raw,
+                "edges_flags": edges_flags_raw,
+                "poly_portals": portals_poly_raw,
+            })
 
     portals_el = root.find("Portals")
     if portals_el is not None:
@@ -232,17 +257,145 @@ def _link_obj(obj, col):
     col.objects.link(obj)
 
 
+def _get_or_create_cube_mesh(name, size=0.5):
+    """Create (or reuse) a simple cube mesh used by YNV markers."""
+    mesh = bpy.data.meshes.get(name)
+    if mesh is not None:
+        return mesh
+
+    mesh = bpy.data.meshes.new(name)
+    bm = bmesh.new()
+    bmesh.ops.create_cube(bm, size=size)
+    bm.to_mesh(mesh)
+    bm.free()
+    mesh.update()
+    return mesh
+
+
+def _get_asset_path(filename):
+    """Return absolute path for an addon asset file."""
+    return os.path.join(os.path.dirname(__file__), "assets", filename)
+
+
+def _load_marker_mesh_from_glb(cache_name):
+    """Import the marker GLB once and cache its first mesh datablock.
+
+    Returns None if the asset cannot be imported.
+    """
+    mesh = bpy.data.meshes.get(cache_name)
+    if mesh is not None:
+        return mesh
+
+    asset_path = _get_asset_path("cube_arrow.glb")
+    if not os.path.exists(asset_path):
+        return None
+    if not hasattr(bpy.ops.import_scene, "gltf"):
+        return None
+
+    object_names_before = {obj.name for obj in bpy.data.objects}
+    collection_names_before = {col.name for col in bpy.data.collections}
+
+    try:
+        result = bpy.ops.import_scene.gltf(filepath=asset_path)
+    except Exception:
+        return None
+
+    if "FINISHED" not in result:
+        return None
+
+    new_objects = [obj for obj in bpy.data.objects if obj.name not in object_names_before]
+    source_obj = next((obj for obj in new_objects if obj.type == "MESH"), None)
+    if source_obj is None:
+        for obj in reversed(new_objects):
+            bpy.data.objects.remove(obj, do_unlink=True)
+        for col in list(bpy.data.collections):
+            if col.name not in collection_names_before and not col.objects and not col.children:
+                bpy.data.collections.remove(col)
+        return None
+
+    mesh = source_obj.data.copy()
+    mesh.name = cache_name
+    mesh.transform(source_obj.matrix_world)
+    mesh.update()
+
+    for obj in reversed(new_objects):
+        bpy.data.objects.remove(obj, do_unlink=True)
+    for col in list(bpy.data.collections):
+        if col.name not in collection_names_before and not col.objects and not col.children:
+            bpy.data.collections.remove(col)
+
+    return mesh
+
+
+def _get_or_create_marker_mesh(cache_name, fallback_name, fallback_size):
+    """Return marker mesh and whether it already contains embedded direction."""
+    mesh = _load_marker_mesh_from_glb(cache_name)
+    if mesh is not None:
+        return mesh, True
+    return _get_or_create_cube_mesh(fallback_name, size=fallback_size), False
+
+
+def _apply_sollumz_type(obj, type_name):
+    """Apply Sollumz type on object when property/addon is available."""
+    if not hasattr(obj, "sollum_type"):
+        return False
+
+    mapping = {
+        "NAVMESH": "sollumz_navmesh",
+        "NAVMESH_POLY_MESH": "sollumz_navmesh_mesh",
+        "NAVMESH_PORTAL": "sollumz_navmesh_portal",
+        "NAVMESH_POINT": "sollumz_navmesh_point",
+    }
+    candidate = mapping.get(type_name, type_name)
+    try:
+        obj.sollum_type = candidate
+        return True
+    except Exception:
+        return False
+
+
+def _add_direction_arrow(parent_obj, col, angle, size=0.85):
+    """Attach a visual arrow empty to show direction."""
+    arrow = bpy.data.objects.new(f"{parent_obj.name}_Dir", None)
+    arrow.empty_display_type = "SINGLE_ARROW"
+    arrow.empty_display_size = size
+    arrow.location = (0.0, 0.0, 0.0)
+    arrow.rotation_euler = (0.0, 0.0, angle)
+    arrow["ynv_type"] = "direction_arrow"
+    arrow.parent = parent_obj
+    _link_obj(arrow, col)
+    return arrow
+
+
+def _idx_name(i):
+    """Sollumz-like 1-based suffix formatting."""
+    return f"{i + 1:02d}"
+
+
+def _build_ynv_root(name, col):
+    """Create top-level YNV root object for clean hierarchy."""
+    root = bpy.data.objects.new(name, None)
+    root.empty_display_type = "PLAIN_AXES"
+    root.empty_display_size = 1.0
+    root["ynv_type"] = "root"
+    _link_obj(root, col)
+    _apply_sollumz_type(root, "NAVMESH")
+    return root
+
+
 def _build_navmesh_obj(polygons_data, area_id):
     """Builds the Blender mesh with shared materials per (b0,b1,b2,b3)."""
     vert_map    = {}
     verts_list  = []
     faces_list  = []
-    # For each face: keep flags and raw edge lines so export can preserve the original structure
+    # For each face: keep flags and raw edge metadata so export can preserve structure.
     face_flags  = []
     face_edges  = []
+    face_edge_flags = []
+    face_portals = []
 
     for poly in polygons_data:
-        b0, b1, b2, b3, b4, b5 = _parse_flags_str(poly["flags"])
+        b0, b1, b2, b3, b4, b5, b6 = _parse_flags_str(poly["flags"])
         face_indices = []
         for v in poly["verts"]:
             key = (round(v[0], 4), round(v[1], 4), round(v[2], 4))
@@ -252,10 +405,12 @@ def _build_navmesh_obj(polygons_data, area_id):
             face_indices.append(vert_map[key])
         if len(face_indices) >= 3:
             faces_list.append(face_indices)
-            face_flags.append((b0, b1, b2, b3, b4, b5))
+            face_flags.append((b0, b1, b2, b3, b4, b5, b6))
             face_edges.append(poly.get("edges", []))
+            face_edge_flags.append(poly.get("edges_flags", []))
+            face_portals.append(poly.get("poly_portals", []))
 
-    mesh = bpy.data.meshes.new(f"YNV_{area_id}_PolyMesh")
+    mesh = bpy.data.meshes.new("NavMesh Poly Mesh")
     mesh.from_pydata(verts_list, [], faces_list)
     mesh.update()
 
@@ -263,7 +418,7 @@ def _build_navmesh_obj(polygons_data, area_id):
     # Dictionary mat_key → index in mesh.materials
     mat_index_map = {}
 
-    for i, (b0, b1, b2, b3, b4, b5) in enumerate(face_flags):
+    for i, (b0, b1, b2, b3, b4, b5, b6) in enumerate(face_flags):
         key = _mat_key(b0, b1, b2, b3)
         if key not in mat_index_map:
             mat = _get_or_create_material(b0, b1, b2, b3)
@@ -271,51 +426,250 @@ def _build_navmesh_obj(polygons_data, area_id):
             mat_index_map[key] = len(mesh.materials) - 1
 
     # Assign material_index to each polygon
-    for i, (b0, b1, b2, b3, b4, b5) in enumerate(face_flags):
+    for i, (b0, b1, b2, b3, b4, b5, b6) in enumerate(face_flags):
         key = _mat_key(b0, b1, b2, b3)
         mesh.polygons[i].material_index = mat_index_map[key]
         # Store bytes 4-5 (internal density) in polygon custom prop if possible
         # For now, we store them in a layer via bpy if necessary — but pass
 
-    obj = bpy.data.objects.new(f"YNV_{area_id}_PolyMesh", mesh)
+    obj = bpy.data.objects.new("NavMesh Poly Mesh", mesh)
     obj["ynv_type"]    = "poly_mesh"
     obj["ynv_area_id"] = area_id
-    # Store bytes 4-5 and edge data for faithful XML rebuilding.
-    b45_data = [(ff[4], ff[5]) for ff in face_flags]
-    obj["ynv_bytes45"] = json.dumps(b45_data)
+    _apply_sollumz_type(obj, "NAVMESH_POLY_MESH")
+    # Store per-face extra bytes + edge metadata for faithful XML rebuilding.
+    b456_data = [(ff[4], ff[5], ff[6]) for ff in face_flags]
+    obj["ynv_bytes456"] = json.dumps(b456_data)
+    # Backward compatibility with older data layout.
+    obj["ynv_bytes45"] = json.dumps([(ff[4], ff[5]) for ff in face_flags])
     obj["ynv_edge_lines"] = json.dumps(face_edges)
+    obj["ynv_edge_flag_lines"] = json.dumps(face_edge_flags)
+    obj["ynv_poly_portals"] = json.dumps(face_portals)
     return obj
 
 
 def _build_portals_objs(props, col):
-    root = bpy.data.objects.new("YNV_Portals", None)
+    root = bpy.data.objects.new("Portals", None)
     root.empty_display_type = "PLAIN_AXES"; root.empty_display_size = 0.5
     root["ynv_type"] = "portals_root"; _link_obj(root, col)
+
+    portal_mesh, portal_has_arrow = _get_or_create_marker_mesh("YNV_CubeArrowPortalMesh", "YNV_PortalCube", 0.35)
+    point_mesh, point_has_arrow = _get_or_create_marker_mesh("YNV_CubeArrowPointMesh", "YNV_PortalPointCube", 0.22)
+
     for i, portal in enumerate(props.portals):
-        for side, pos, typ in [("from", portal.pos_from, "portal_from"), ("to", portal.pos_to, "portal_to")]:
-            obj = bpy.data.objects.new(f"YNV_Portal_{i}_{side}", None)
-            obj.empty_display_type = "SPHERE"
-            obj.empty_display_size = 1.0 if side == "from" else 0.7
-            obj.location = pos
-            obj["ynv_type"] = typ; obj["portal_index"] = i
-            obj["portal_type"] = portal.portal_type
-            obj["poly_from"] = portal.poly_from; obj["poly_to"] = portal.poly_to
-            obj.parent = root; _link_obj(obj, col)
+        # Main portal marker at segment midpoint, oriented on Z from from->to.
+        pfrom = Vector(portal.pos_from)
+        pto = Vector(portal.pos_to)
+        center = (pfrom + pto) * 0.5
+        direction = pto - pfrom
+
+        idx = _idx_name(i)
+        portal_obj = bpy.data.objects.new(f"NavMesh Portal.{idx}", portal_mesh)
+        portal_obj.location = center
+        if direction.length_squared > 1e-9:
+            portal_obj.rotation_euler = (0.0, 0.0, math.atan2(direction.y, direction.x))
+        portal_obj["ynv_type"] = "portal"
+        portal_obj["portal_index"] = i
+        portal_obj["portal_type"] = portal.portal_type
+        portal_obj["poly_from"] = portal.poly_from
+        portal_obj["poly_to"] = portal.poly_to
+        portal_obj.parent = root
+        _link_obj(portal_obj, col)
+        _apply_sollumz_type(portal_obj, "NAVMESH_PORTAL")
+        if portal_has_arrow:
+            portal_obj.scale = (1.15, 1.15, 1.15)
+        else:
+            _add_direction_arrow(portal_obj, col, 0.0, size=0.75)
+
+        from_obj = bpy.data.objects.new(f"PortalFrom Point.{idx}", point_mesh)
+        from_obj.location = portal.pos_from
+        from_obj.rotation_euler = (0.0, 0.0, portal_obj.rotation_euler.z)
+        from_obj["ynv_type"] = "portal_from"
+        from_obj["portal_index"] = i
+        from_obj["portal_type"] = portal.portal_type
+        from_obj["poly_from"] = portal.poly_from
+        from_obj["poly_to"] = portal.poly_to
+        from_obj.parent = portal_obj
+        _link_obj(from_obj, col)
+        _apply_sollumz_type(from_obj, "NAVMESH_PORTAL")
+        if not point_has_arrow:
+            _add_direction_arrow(from_obj, col, 0.0, size=0.65)
+
+        to_obj = bpy.data.objects.new(f"PortalTo Point.{idx}", point_mesh)
+        to_obj.location = portal.pos_to
+        to_obj.rotation_euler = (0.0, 0.0, portal_obj.rotation_euler.z + math.pi)
+        to_obj["ynv_type"] = "portal_to"
+        to_obj["portal_index"] = i
+        to_obj["portal_type"] = portal.portal_type
+        to_obj["poly_from"] = portal.poly_from
+        to_obj["poly_to"] = portal.poly_to
+        to_obj.parent = portal_obj
+        _link_obj(to_obj, col)
+        _apply_sollumz_type(to_obj, "NAVMESH_PORTAL")
+        if not point_has_arrow:
+            _add_direction_arrow(to_obj, col, 0.0, size=0.65)
     return root
 
 
 def _build_navpoints_objs(props, col):
-    root = bpy.data.objects.new("YNV_NavPoints", None)
+    root = bpy.data.objects.new("Points", None)
     root.empty_display_type = "PLAIN_AXES"; root.empty_display_size = 0.1
     root["ynv_type"] = "navpoints_root"; _link_obj(root, col)
+    nav_mesh, nav_has_arrow = _get_or_create_marker_mesh("YNV_CubeArrowNavPointMesh", "YNV_NavPointCube", 0.28)
+
     for i, np_item in enumerate(props.nav_points):
-        obj = bpy.data.objects.new(f"YNV_NavPt_{i}_T{np_item.point_type}", None)
-        obj.empty_display_type = "SINGLE_ARROW"; obj.empty_display_size = 1.5
+        obj = bpy.data.objects.new(f"NavMesh Point.{_idx_name(i)}", nav_mesh)
         obj.location = np_item.position; obj.rotation_euler = (0, 0, np_item.angle)
         obj["ynv_type"] = "nav_point"; obj["point_index"] = i
         obj["point_type"] = np_item.point_type; obj["point_angle"] = np_item.angle
         obj.parent = root; _link_obj(obj, col)
+        _apply_sollumz_type(obj, "NAVMESH_POINT")
+        if not nav_has_arrow:
+            _add_direction_arrow(obj, col, 0.0, size=0.85)
     return root
+
+
+def _iter_navpoint_objects(context):
+    """Return nav point empties sorted by stable point index then name."""
+    nav_objs = [o for o in context.scene.objects if o.get("ynv_type") == "nav_point"]
+    return sorted(nav_objs, key=lambda o: (int(o.get("point_index", 10**9)), o.name))
+
+
+def _sync_navpoints_from_objects(context, props, keep_props_if_no_objects=False):
+    """Sync nav_points collection from nav_point empties.
+
+    If keep_props_if_no_objects is True and no nav_point empties exist,
+    keep current props.nav_points untouched.
+    Returns (count, synced_from_objects).
+    """
+    nav_objs = _iter_navpoint_objects(context)
+    if keep_props_if_no_objects and not nav_objs:
+        props.stat_navpoints = len(props.nav_points)
+        return props.stat_navpoints, False
+
+    props.nav_points.clear()
+    for i, obj in enumerate(nav_objs):
+        np = props.nav_points.add()
+        np.position = tuple(obj.location)
+        np.point_type = int(obj.get("point_type", 0))
+        np.angle = float(obj.rotation_euler.z)
+        obj["point_index"] = i
+        obj["point_type"] = np.point_type
+        obj["point_angle"] = np.angle
+
+    props.stat_navpoints = len(props.nav_points)
+    return props.stat_navpoints, True
+
+
+def _refresh_navpoints_objects(props):
+    """Rebuild nav point empties from props.nav_points to keep indices stable."""
+    col = bpy.data.collections.get(YNV_COLLECTION)
+    if col is None:
+        return
+
+    for obj in list(col.objects):
+        if obj.get("ynv_type") in {"nav_point", "navpoints_root"}:
+            bpy.data.objects.remove(obj, do_unlink=True)
+
+    _build_navpoints_objs(props, col)
+
+
+def _sanitize_portals_for_poly_count(props, poly_count):
+    """Keep only portals that reference existing polygon indices.
+
+    Returns number of removed portals.
+    """
+    if poly_count < 0:
+        poly_count = 0
+
+    keep = []
+    for p in props.portals:
+        pf = int(p.poly_from)
+        pt = int(p.poly_to)
+        if 0 <= pf < poly_count and 0 <= pt < poly_count:
+            keep.append({
+                "portal_type": int(p.portal_type),
+                "angle": float(p.angle),
+                "poly_from": pf,
+                "poly_to": pt,
+                "pos_from": tuple(p.pos_from),
+                "pos_to": tuple(p.pos_to),
+            })
+
+    removed = len(props.portals) - len(keep)
+    if removed <= 0:
+        return 0
+
+    props.portals.clear()
+    for entry in keep:
+        p = props.portals.add()
+        p.portal_type = entry["portal_type"]
+        p.angle = entry["angle"]
+        p.poly_from = entry["poly_from"]
+        p.poly_to = entry["poly_to"]
+        p.pos_from = entry["pos_from"]
+        p.pos_to = entry["pos_to"]
+
+    props.portal_index = min(props.portal_index, len(props.portals) - 1)
+    props.stat_portals = len(props.portals)
+    return removed
+
+
+def _edge_lines_valid_for_poly(edge_list, poly, vert_count):
+    """Check if cached edge lines are structurally valid for this polygon."""
+    if not isinstance(edge_list, list):
+        return False
+    if len(edge_list) != poly.loop_total:
+        return False
+
+    for line in edge_list:
+        if not isinstance(line, str) or ":" not in line or "," not in line:
+            return False
+        try:
+            left, right = line.split(",", 1)
+            _, a = left.strip().split(":", 1)
+            _, b = right.strip().split(":", 1)
+            ia = int(a.strip())
+            ib = int(b.strip())
+        except Exception:
+            return False
+        if ia < 0 or ib < 0 or ia >= vert_count or ib >= vert_count:
+            return False
+
+    return True
+
+
+def _edge_flag_lines_valid_for_poly(edge_flags_list, expected_count):
+    """Check cached EdgesFlags block validity for one polygon."""
+    if not isinstance(edge_flags_list, list):
+        return False
+    if len(edge_flags_list) != expected_count:
+        return False
+
+    for line in edge_flags_list:
+        if not isinstance(line, str) or ":" not in line or "," not in line:
+            return False
+        try:
+            left, right = line.split(",", 1)
+            a0, a1 = left.strip().split(":", 1)
+            b0, b1 = right.strip().split(":", 1)
+            int(a0.strip()); int(a1.strip()); int(b0.strip()); int(b1.strip())
+        except Exception:
+            return False
+    return True
+
+
+def _poly_portal_links_valid(portal_links, portal_count):
+    """Check per-poly portal link list values are within portal index bounds."""
+    if not isinstance(portal_links, list):
+        return False
+    for x in portal_links:
+        try:
+            v = int(x)
+        except Exception:
+            return False
+        if v < 0 or v >= portal_count:
+            return False
+    return True
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -323,6 +677,9 @@ def _build_navpoints_objs(props, col):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _build_ynv_xml(context, props):
+    # Prefer scene nav_point empties when present so manual delete/move is reflected in export.
+    _sync_navpoints_from_objects(context, props, keep_props_if_no_objects=True)
+
     root = ET.Element("NavMesh")
     cf = ET.SubElement(root, "ContentFlags"); cf.text = props.content_flags
     sub_val(root, "AreaID", props.area_id)
@@ -336,10 +693,69 @@ def _build_ynv_xml(context, props):
 
     polys_el   = ET.SubElement(root, "Polygons")
     poly_obj   = next((o for o in context.scene.objects if o.get("ynv_type") == "poly_mesh"), None)
+    poly_count = 0
     if poly_obj and poly_obj.type == "MESH":
-        mesh      = poly_obj.data
-        b45_data    = json.loads(poly_obj.get("ynv_bytes45", "[]"))
-        edge_lines  = json.loads(poly_obj.get("ynv_edge_lines", "[]"))
+        mesh = poly_obj.data
+        poly_count = len(mesh.polygons)
+        removed_portals = _sanitize_portals_for_poly_count(props, poly_count)
+        if removed_portals:
+            print(f"[YNV] Removed {removed_portals} invalid portal(s) during export (poly index out of range)")
+
+        try:
+            b456_data = json.loads(poly_obj.get("ynv_bytes456", "[]"))
+        except Exception:
+            b456_data = []
+        if not isinstance(b456_data, list):
+            b456_data = []
+
+        if not b456_data:
+            try:
+                b45_data = json.loads(poly_obj.get("ynv_bytes45", "[]"))
+            except Exception:
+                b45_data = []
+            if isinstance(b45_data, list):
+                b456_data = []
+                for pair in b45_data:
+                    if isinstance(pair, (list, tuple)) and len(pair) >= 2:
+                        b456_data.append([int(pair[0]), int(pair[1]), 0])
+                    else:
+                        b456_data.append([0, 0, 0])
+
+        try:
+            edge_lines = json.loads(poly_obj.get("ynv_edge_lines", "[]"))
+        except Exception:
+            edge_lines = []
+        if not isinstance(edge_lines, list):
+            edge_lines = []
+
+        try:
+            edge_flag_lines = json.loads(poly_obj.get("ynv_edge_flag_lines", "[]"))
+        except Exception:
+            edge_flag_lines = []
+        if not isinstance(edge_flag_lines, list):
+            edge_flag_lines = []
+
+        try:
+            poly_portal_links = json.loads(poly_obj.get("ynv_poly_portals", "[]"))
+        except Exception:
+            poly_portal_links = []
+        if not isinstance(poly_portal_links, list):
+            poly_portal_links = []
+
+        # If polygon topology has changed (face delete/add), stale edge cache can become invalid.
+        # Fallback to regenerated per-face edges in that case.
+        if len(edge_lines) != poly_count:
+            edge_lines = []
+        if len(edge_flag_lines) != poly_count:
+            edge_flag_lines = []
+        if len(poly_portal_links) != poly_count:
+            poly_portal_links = []
+
+        # Keep bytes4/5/6 array aligned with face count.
+        if len(b456_data) < poly_count:
+            b456_data.extend([[0, 0, 0] for _ in range(poly_count - len(b456_data))])
+        elif len(b456_data) > poly_count:
+            b456_data = b456_data[:poly_count]
 
         for i, poly in enumerate(mesh.polygons):
             mi  = poly.material_index
@@ -348,14 +764,20 @@ def _build_ynv_xml(context, props):
                 b0, b1, b2, b3 = mat["ynv_b0"], mat["ynv_b1"], mat["ynv_b2"], mat["ynv_b3"]
             else:
                 b0, b1, b2, b3 = 0, 0, 0, 0
-            if i < len(b45_data):
-                b4, b5 = b45_data[i]
+            if i < len(b456_data):
+                triplet = b456_data[i]
+                if isinstance(triplet, (list, tuple)) and len(triplet) >= 3:
+                    b4, b5, b6 = int(triplet[0]), int(triplet[1]), int(triplet[2])
+                elif isinstance(triplet, (list, tuple)) and len(triplet) >= 2:
+                    b4, b5, b6 = int(triplet[0]), int(triplet[1]), 0
+                else:
+                    b4, b5, b6 = 0, 0, 0
             else:
-                b4, b5 = 0, 0
+                b4, b5, b6 = 0, 0, 0
 
             item     = ET.SubElement(polys_el, "Item")
             flags_el = ET.SubElement(item, "Flags")
-            flags_el.text = f"{b0} {b1} {b2} {b3} {b4} {b5}"
+            flags_el.text = f"{b0} {b1} {b2} {b3} {b4} {b5} {b6}"
 
             verts_el  = ET.SubElement(item, "Vertices")
             vert_lines = []
@@ -365,14 +787,24 @@ def _build_ynv_xml(context, props):
             verts_el.text = "\n" + "\n".join(vert_lines) + "\n   "
 
             edges_el  = ET.SubElement(item, "Edges")
-            if i < len(edge_lines) and edge_lines[i]:
-                edges_el.text = "\n" + "\n".join(edge_lines[i]) + "\n   "
+            if i < len(edge_lines) and _edge_lines_valid_for_poly(edge_lines[i], poly, len(mesh.vertices)):
+                final_edges = edge_lines[i]
             else:
-                elines = []
-                verts = list(poly.vertices)
-                for a, b in zip(verts, verts[1:] + verts[:1]):
-                    elines.append(f"    {props.area_id}:{a}, {props.area_id}:{b}")
-                edges_el.text = "\n" + "\n".join(elines) + "\n   "
+                final_edges = ["16383:16383, 16383:16383" for _ in range(poly.loop_total)]
+            edges_el.text = "\n" + "\n".join([f"    {ln}" for ln in final_edges]) + "\n   "
+
+            edges_flags_el = ET.SubElement(item, "EdgesFlags")
+            if i < len(edge_flag_lines) and _edge_flag_lines_valid_for_poly(edge_flag_lines[i], len(final_edges)):
+                final_edge_flags = edge_flag_lines[i]
+            else:
+                final_edge_flags = ["0:0, 0:0" for _ in range(len(final_edges))]
+            edges_flags_el.text = "\n" + "\n".join([f"    {ln}" for ln in final_edge_flags]) + "\n   "
+
+            if i < len(poly_portal_links) and _poly_portal_links_valid(poly_portal_links[i], len(props.portals)):
+                links = [str(int(v)) for v in poly_portal_links[i]]
+                if links:
+                    p_el = ET.SubElement(item, "Portals")
+                    p_el.text = "\n" + "\n".join([f"    {v}" for v in links]) + "\n   "
 
     portals_el = ET.SubElement(root, "Portals")
     for portal in props.portals:
@@ -471,11 +903,25 @@ class YNV_OT_Import(Operator):
         col = _get_or_create_col(YNV_COLLECTION)
         for obj in list(col.objects):
             bpy.data.objects.remove(obj, do_unlink=True)
+
+        base_name = os.path.basename(self.filepath)
+        lower_name = base_name.lower()
+        if lower_name.endswith(".ynv.xml"):
+            root_name = base_name[:-8]
+        else:
+            root_name = os.path.splitext(base_name)[0]
+        root_obj = _build_ynv_root(root_name, col)
+
         if polygons_data:
             poly_obj = _build_navmesh_obj(polygons_data, props.area_id)
             _link_obj(poly_obj, col)
-        _build_portals_objs(props, col)
-        _build_navpoints_objs(props, col)
+            poly_obj.parent = root_obj
+
+        portals_root = _build_portals_objs(props, col)
+        portals_root.parent = root_obj
+        points_root = _build_navpoints_objs(props, col)
+        points_root.parent = root_obj
+
         n_mats = len(set(m.name for m in bpy.data.materials if m.name.startswith("YNV_")))
         self.report({"INFO"},
             f"YNV imported: {props.stat_polygons} polygons, "
@@ -497,6 +943,11 @@ class YNV_OT_Export(Operator):
         context.window_manager.fileselect_add(self); return {"RUNNING_MODAL"}
     def execute(self, context):
         props = context.scene.gta5_pathing.ynv
+        poly_obj = next((o for o in context.scene.objects if o.get("ynv_type") == "poly_mesh" and o.type == "MESH"), None)
+        poly_count = len(poly_obj.data.polygons) if poly_obj is not None else 0
+        removed_portals = _sanitize_portals_for_poly_count(props, poly_count)
+        if removed_portals:
+            self.report({"WARNING"}, f"{removed_portals} invalid portal(s) removed before export")
         xml_str = _build_ynv_xml(context, props)
         try:
             with open(self.filepath, "w", encoding="utf-8") as f:
@@ -550,7 +1001,7 @@ class YNV_OT_ApplyCustomFlags(Operator):
         props = context.scene.gta5_pathing.ynv
         pf    = props.selected_poly_flags
         flags_str = pf.to_flags_str()
-        b0, b1, b2, b3, b4, b5 = _parse_flags_str(flags_str)
+        b0, b1, b2, b3, _b4, _b5, _b6 = _parse_flags_str(flags_str)
         return _apply_flags_to_selection(context, props, b0, b1, b2, b3, "custom")
 
 
@@ -574,9 +1025,16 @@ def _apply_flags_to_selection(context, props, b0, b1, b2, b3, label):
     except Exception:
         b45_data = []
 
+    try:
+        b456_data = json.loads(obj.get("ynv_bytes456", "[]"))
+    except Exception:
+        b456_data = []
+
     # Ensure b45_data has enough entries
     while len(b45_data) < len(mesh.polygons):
         b45_data.append([0, 0])
+    while len(b456_data) < len(mesh.polygons):
+        b456_data.append([0, 0, 0])
 
     for face in bm.faces:
         if face.select:
@@ -585,6 +1043,7 @@ def _apply_flags_to_selection(context, props, b0, b1, b2, b3, label):
 
     bmesh.update_edit_mesh(mesh)
     obj["ynv_bytes45"] = json.dumps(b45_data)
+    obj["ynv_bytes456"] = json.dumps(b456_data)
     return {"FINISHED"}
 
 
@@ -602,6 +1061,7 @@ class YNV_OT_AddPolygon(Operator):
             poly_obj["ynv_type"] = "poly_mesh"
             poly_obj["ynv_area_id"] = props.area_id
             poly_obj["ynv_bytes45"] = "[]"
+            poly_obj["ynv_bytes456"] = "[]"
             _link_obj(poly_obj, col)
 
         preset       = props.flag_preset
@@ -639,6 +1099,13 @@ class YNV_OT_AddPolygon(Operator):
             b45_data = []
         b45_data.append([0, 0])
         poly_obj["ynv_bytes45"] = json.dumps(b45_data)
+
+        try:
+            b456_data = json.loads(poly_obj.get("ynv_bytes456", "[]"))
+        except Exception:
+            b456_data = []
+        b456_data.append([0, 0, 0])
+        poly_obj["ynv_bytes456"] = json.dumps(b456_data)
 
         props.stat_polygons = len(mesh.polygons)
         labels = " + ".join(_flag_label_parts(b0, b1, b2, b3))
@@ -687,6 +1154,7 @@ class YNV_OT_AddNavPoint(Operator):
         np.position = (cursor.x, cursor.y, cursor.z)
         props.nav_point_index = len(props.nav_points) - 1
         props.stat_navpoints  = len(props.nav_points)
+        _refresh_navpoints_objects(props)
         return {"FINISHED"}
 
 
@@ -703,6 +1171,7 @@ class YNV_OT_RemoveNavPoint(Operator):
         props.nav_points.remove(props.nav_point_index)
         props.nav_point_index = min(props.nav_point_index, len(props.nav_points) - 1)
         props.stat_navpoints  = len(props.nav_points)
+        _refresh_navpoints_objects(props)
         return {"FINISHED"}
 
 
@@ -712,15 +1181,8 @@ class YNV_OT_SyncFromObjects(Operator):
     bl_options = {"REGISTER", "UNDO"}
     def execute(self, context):
         props = context.scene.gta5_pathing.ynv
-        props.nav_points.clear()
-        for obj in sorted([o for o in context.scene.objects if o.get("ynv_type") == "nav_point"],
-                          key=lambda o: o.get("point_index", 0)):
-            np = props.nav_points.add()
-            np.position   = tuple(obj.location)
-            np.point_type = obj.get("point_type", 0)
-            np.angle      = obj.rotation_euler.z
-        props.stat_navpoints = len(props.nav_points)
-        self.report({"INFO"}, f"Sync: {len(props.nav_points)} nav points")
+        count, _ = _sync_navpoints_from_objects(context, props, keep_props_if_no_objects=False)
+        self.report({"INFO"}, f"Sync: {count} nav points")
         return {"FINISHED"}
 
 

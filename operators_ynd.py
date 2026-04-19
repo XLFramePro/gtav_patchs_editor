@@ -16,52 +16,20 @@ YND_COLLECTION = "YND_PathNodes"
 #  HELPERS FLAGS I/O
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _int_to_special_type(v):
-    spec_raw = v >> 3
-    m = {0:"NONE",2:"PARKING",10:"PED_CROSSING",14:"PED_ASSISTED",
-         15:"TRAFFIC_LIGHT",16:"STOP_SIGN",17:"CAUTION",18:"PED_NOWAIT",
-         19:"EMERGENCY",20:"OFFROAD_JCT"}
-    return m.get(spec_raw, "NONE")
-
-def _int_to_speed(v):
-    m = {0:"SLOW",2:"NORMAL",4:"FAST",6:"FASTER"}
-    return m.get(v & 0xFE, "NORMAL")
-
-def _apply_node_flags(n, f0, f1, f2, f3, f4, f5):
-    """Apply 6 raw ints into structured flag PropertyGroups."""
-    nf0 = n.flags0
-    nf0.scripted        = bool(f0 & 1);   nf0.gps_enabled    = bool(f0 & 2)
-    nf0.unused_4        = bool(f0 & 4);   nf0.offroad        = bool(f0 & 8)
-    nf0.unused_16       = bool(f0 & 16);  nf0.no_big_vehicles= bool(f0 & 32)
-    nf0.cannot_go_right = bool(f0 & 64);  nf0.cannot_go_left = bool(f0 & 128)
-
-    nf1 = n.flags1
-    nf1.slip_lane           = bool(f1 & 1)
-    nf1.indicate_keep_left  = bool(f1 & 2)
-    nf1.indicate_keep_right = bool(f1 & 4)
-    nf1.special_type        = _int_to_special_type(f1)
-
-    nf2 = n.flags2
-    nf2.no_gps      = bool(f2 & 1);   nf2.unused_2   = bool(f2 & 2)
-    nf2.junction    = bool(f2 & 4);   nf2.unused_8   = bool(f2 & 8)
-    nf2.disabled_1  = bool(f2 & 16);  nf2.water_boats= bool(f2 & 32)
-    nf2.freeway     = bool(f2 & 64);  nf2.disabled_2 = bool(f2 & 128)
-
-    nf3 = n.flags3
-    nf3.tunnel    = bool(f3 & 1)
-    nf3.heuristic = (f3 >> 1) & 127
-
-    nf4 = n.flags4
-    nf4.density       = f4 & 0xF
-    nf4.deadendness   = (f4 >> 4) & 7
-    nf4.left_turn_only= bool(f4 & 128)
-
-    nf5 = n.flags5
-    nf5.has_junction_heightmap = bool(f5 & 1)
-    nf5.speed = _int_to_speed(f5)
-
-    # Store raw values for fast export
-    n.raw0=f0; n.raw1=f1; n.raw2=f2; n.raw3=f3; n.raw4=f4; n.raw5=f5
+def _apply_node_flags(
+    n: "bpy.types.PropertyGroup",
+    f0: int, f1: int, f2: int, f3: int, f4: int, f5: int,
+) -> None:
+    """Decode 6 raw flag bytes into the node's PropertyGroup sub-groups."""
+    n.flags0.from_int(f0)
+    n.flags1.from_int(f1)
+    n.flags2.from_int(f2)
+    n.flags3.from_int(f3)
+    n.flags4.from_int(f4)
+    n.flags5.from_int(f5)
+    # Keep raw mirrors for potential low-level I/O access.
+    n.raw0 = f0; n.raw1 = f1; n.raw2 = f2
+    n.raw3 = f3; n.raw4 = f4; n.raw5 = f5
 
 
 def _node_flags_to_ints(n):
@@ -75,27 +43,11 @@ def _node_flags_to_ints(n):
     return f0, f1, f2, f3, f4, f5
 
 
-def _apply_link_flags(lk, f0, f1, f2):
-    lf0 = lk.flags0
-    lf0.gps_both_ways     = bool(f0 & 1)
-    lf0.block_if_no_lanes = bool(f0 & 2)
-    lf0.unknown_1         = (f0 >> 2) & 7
-    lf0.unknown_2         = (f0 >> 5) & 7
-
-    lf1 = lk.flags1
-    lf1.unused_1        = bool(f1 & 1)
-    lf1.narrow_road     = bool(f1 & 2)
-    lf1.dead_end        = bool(f1 & 4)
-    lf1.dead_end_exit   = bool(f1 & 8)
-    lf1.offset          = (f1 >> 4) & 7
-    lf1.negative_offset = bool(f1 & 128)
-
-    lf2 = lk.flags2
-    lf2.dont_use_for_navigation = bool(f2 & 1)
-    lf2.shortcut                = bool(f2 & 2)
-    lf2.back_lanes              = (f2 >> 2) & 7
-    lf2.forward_lanes           = (f2 >> 5) & 7
-
+def _apply_link_flags(lk: "bpy.types.PropertyGroup", f0: int, f1: int, f2: int) -> None:
+    """Decode 3 raw flag bytes into the link's PropertyGroup sub-groups."""
+    lk.flags0.from_int(f0)
+    lk.flags1.from_int(f1)
+    lk.flags2.from_int(f2)
     lk.raw_flags0 = f0; lk.raw_flags1 = f1; lk.raw_flags2 = f2
 
 
@@ -112,6 +64,15 @@ def _node_is_freeway(n):
 
 def _node_is_junction(n):
     return n.flags2.junction
+
+
+def _update_ynd_stats(props: "bpy.types.PropertyGroup") -> None:
+    """Recompute all YND_Props stat counters from the current node list."""
+    nodes = props.nodes
+    props.stat_nodes     = len(nodes)
+    props.stat_vehicle   = sum(1 for n in nodes if _node_is_vehicle(n))
+    props.stat_ped       = sum(1 for n in nodes if not _node_is_vehicle(n))
+    props.stat_junctions = sum(1 for n in nodes if _node_is_junction(n))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -418,9 +379,9 @@ def _build_ynd_xml(context, props):
         sub_val(item, "NodeID", node.node_id)
         ET.SubElement(item, "StreetName").text = node.street_name
         pos = ET.SubElement(item, "Position")
-        pos.set("x", f"{node.position[0]:.5g}")
-        pos.set("y", f"{node.position[1]:.5g}")
-        pos.set("z", f"{node.position[2]:.5g}")
+        pos.set("x", f"{node.position[0]:.6f}")
+        pos.set("y", f"{node.position[1]:.6f}")
+        pos.set("z", f"{node.position[2]:.6f}")
         f0, f1, f2, f3, f4, f5 = _node_flags_to_ints(node)
         for fi, fv in enumerate([f0,f1,f2,f3,f4,f5]):
             sub_val(item, f"Flags{fi}", fv)
@@ -501,9 +462,7 @@ class YND_OT_AddVehicleNode(Operator):
         # Default vehicle flags: Normal speed, GPS enabled
         _apply_node_flags(n, 2, 0, 0, 64, 134, 2)
         props.node_index   = len(props.nodes) - 1
-        props.stat_nodes   = len(props.nodes)
-        props.stat_vehicle = sum(1 for nd in props.nodes if _node_is_vehicle(nd))
-        props.stat_ped     = sum(1 for nd in props.nodes if not _node_is_vehicle(nd))
+        _update_ynd_stats(props)
         col = _get_or_create_col(YND_COLLECTION)
         obj = bpy.data.objects.new(f"YND_V_{n.area_id}_{n.node_id}", None)
         obj.empty_display_type = "CUBE"; obj.empty_display_size = 0.5
@@ -530,9 +489,7 @@ class YND_OT_AddPedNode(Operator):
         # flags1 with special_type PED_CROSSING (value 10 << 3 = 80)
         _apply_node_flags(n, 2, 80, 0, 8, 2, 2)
         props.node_index   = len(props.nodes) - 1
-        props.stat_nodes   = len(props.nodes)
-        props.stat_vehicle = sum(1 for nd in props.nodes if _node_is_vehicle(nd))
-        props.stat_ped     = sum(1 for nd in props.nodes if not _node_is_vehicle(nd))
+        _update_ynd_stats(props)
         col = _get_or_create_col(YND_COLLECTION)
         obj = bpy.data.objects.new(f"YND_P_{n.area_id}_{n.node_id}", None)
         obj.empty_display_type = "SPHERE"; obj.empty_display_size = 0.3
@@ -586,10 +543,7 @@ class YND_OT_RemoveNode(Operator):
                 obj["node_index"] = mapped_idx
 
         props.node_index   = min(idx, len(props.nodes) - 1)
-        props.stat_nodes   = len(props.nodes)
-        props.stat_vehicle = sum(1 for n in props.nodes if _node_is_vehicle(n))
-        props.stat_ped     = sum(1 for n in props.nodes if not _node_is_vehicle(n))
-        props.stat_junctions = sum(1 for n in props.nodes if _node_is_junction(n))
+        _update_ynd_stats(props)
 
         _refresh_ynd_link_objects(props)
         self.report({"INFO"}, f"Node removed: {r_area}:{r_id} ({removed_links} link(s) removed)")

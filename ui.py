@@ -47,8 +47,8 @@ class GTA5_UL_YND_Links(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_prop, index):
         f2 = item.flags2
         fwd = f2.forward_lanes; bk = f2.back_lanes
-        dead = "💀" if item.flags1.dead_end else ""
-        gps  = "🛰" if item.flags0.gps_both_ways else ""
+        dead = " [dead]" if item.flags1.dead_end else ""
+        gps  = " [GPS]"  if item.flags0.gps_both_ways else ""
         layout.label(
             text=f"→{item.to_area_id}:{item.to_node_id}  L={item.link_length}  F{fwd}B{bk}{dead}{gps}",
             icon="LINKED"

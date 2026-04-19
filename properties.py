@@ -365,7 +365,7 @@ class YNV_PortalItem(PropertyGroup):
 
 
 class YNV_NavPointItem(PropertyGroup):
-    point_type: IntProperty(name="Type",  default=0, min=0, max=4)
+    point_type: IntProperty(name="Type",  default=0, min=0, max=255)
     angle:      FloatProperty(name="Angle (rad)", default=0.0, min=0.0, max=6.2832, precision=6)
     position:   FloatVectorProperty(name="Position", size=3, default=(0,0,0), precision=5)
 

@@ -100,13 +100,13 @@ def _build_trains_dat(context, props) -> str:
                 for pt in spline.points:
                     item = props.points.add()
                     item.position = (
-                        curve_obj.matrix_world @ Vector(pt.co[:3])
+                        tuple(curve_obj.matrix_world @ Vector(pt.co[:3]))
                     )
                     item.flag = int(pt.radius) if pt.radius in (0, 1, 4, 5) else 0
             elif spline.type == "BEZIER":
                 for pt in spline.bezier_points:
                     item = props.points.add()
-                    item.position = tuple(curve_obj.matrix_world @ pt.co)
+                    item.position = tuple(curve_obj.matrix_world @ Vector(pt.co))
                     item.flag = 0
 
     # Write the DAT
