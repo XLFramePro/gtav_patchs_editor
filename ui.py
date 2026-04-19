@@ -303,6 +303,7 @@ def _draw_ynd(layout, context, props):
         li = node.link_index
         if 0 <= li < len(node.links):
             lk = node.links[li]
+            sub3 = sub2.box()
             sub3.label(text=f"Link {li} → {lk.to_area_id}:{lk.to_node_id}")
 
             row_lk = sub3.row(align=True)
