@@ -1,77 +1,81 @@
 """
-GTA V Pathing Editor — v4.1
-============================
-Import / Edit / Export: YNV · YND · YMT · Trains
-Blender 4.5+
+================================================================================
+GTA V Pathing Editor — Blender 4.5 Addon
+================================================================================
+Supporte les formats :
+  • YNV  — NavMesh (polygones piétons/véhicules, portails, points de nav)
+  • YND  — NodeDictionary (noeuds de chemin véhicules/piétons, liens)
+  • YMT  — ScenarioPointRegion (spawn points, chaining graph, clusters)
+  • TRAINS.DAT — Pistes de train (points 3D avec flags)
+
+Chaque format a ses propres propriétés, opérateurs, import/export XML/.dat
+et visualisation GPU dans le viewport 3D.
+================================================================================
 """
 
 bl_info = {
     "name":        "GTA V Pathing Editor",
     "author":      "XLTeam SDK",
-    "version":     (4, 1, 0),
+    "version":     (1, 0, 0),
     "blender":     (4, 5, 0),
-    "location":    "View3D › N-Panel › GTA5 PE",
-    "description": "Import / Edit / Export  YNV · YND · YMT · Trains for GTA V / FiveM",
+    "location":    "View3D > N-Panel > GTA5 Paths",
+    "description": "Éditeur complet YNV/YND/YMT/Trains pour GTA V",
     "category":    "Import-Export",
 }
 
 import bpy
-from . import props, ops_ynv, ops_ynd, ops_ymt, ops_trains, viewport, ui
 
-_MODULES = [props, ops_ynv, ops_ynd, ops_ymt, ops_trains, viewport, ui]
+from . import (
+    properties,
+    operators_ynv,
+    operators_ynd,
+    operators_ymt,
+    operators_trains,
+    ui,
+    draw_handler,
+)
+
+_modules = [
+    properties,
+    operators_ynv,
+    operators_ynd,
+    operators_ymt,
+    operators_trains,
+    ui,
+    draw_handler,
+]
 
 
-def _launch_modals():
-    """Start lightweight modals for tracking active objects (YND/YMT/Trains)."""
-    for op in ("gta5pe.ynd_track_active",
-               "gta5pe.ymt_track_active",
-               "gta5pe.trains_track_active"):
-        try:
-            getattr(bpy.ops, op.replace(".", "_"))("INVOKE_DEFAULT")
-        except Exception:
-            pass
-    # Alternative direct calls:
-    try: bpy.ops.gta5pe.ynd_track_active("INVOKE_DEFAULT")
-    except Exception: pass
-    try: bpy.ops.gta5pe.ymt_track_active("INVOKE_DEFAULT")
-    except Exception: pass
-    try: bpy.ops.gta5pe.trains_track_active("INVOKE_DEFAULT")
-    except Exception: pass
-
-
-def _poll_active_face():
-    """Timer: auto-read navmesh face flags when in Edit Mode on a YNV mesh.
-    Only runs bmesh operations when actually needed (tab=YNV + edit mode).
-    Interval: 0.2s to reduce CPU overhead."""
+def _start_click_handler():
+    """Lance le modal de clic-sélection s'il n'est pas déjà actif."""
+    import bpy
+    # Vérifier si déjà actif
+    wm = bpy.context.window_manager
+    if wm and hasattr(wm, "operators"):
+        for op in wm.operators:
+            if op.bl_idname == "gta5_ynd.activate_click_select":
+                return
+    # Lancer le modal via le window manager
     try:
-        ctx = bpy.context
-        # Fast bail-out: skip if not on YNV tab or not in edit mode
-        if not hasattr(ctx, "scene") or not hasattr(ctx.scene, "gta5pe"):
-            return 0.2
-        if ctx.scene.gta5pe.tab != "YNV":
-            return 0.2
-        obj = ctx.active_object
-        if not obj or obj.type != "MESH" or obj.mode != "EDIT":
-            return 0.2
-        if not obj.get("ynv_type") == "poly_mesh":
-            return 0.2
-        # Only now do the expensive bmesh call
-        from .ops_ynv import _on_edit_mode_change
-        _on_edit_mode_change()
+        bpy.ops.gta5_ynd.activate_click_select("INVOKE_DEFAULT")
     except Exception:
         pass
-    return 0.2
 
 
 def register():
-    for m in _MODULES:
-        m.register()
-    bpy.app.timers.register(_launch_modals,    first_interval=1.0)
-    bpy.app.timers.register(_poll_active_face, first_interval=2.0, persistent=True)
+    for mod in _modules:
+        mod.register()
+    # Démarrer le handler de clic après un court délai
+    import bpy
+    bpy.app.timers.register(_start_click_handler, first_interval=0.5)
+    print("[GTA5 Pathing Editor] Addon enregistré.")
 
 
 def unregister():
-    if bpy.app.timers.is_registered(_poll_active_face):
-        bpy.app.timers.unregister(_poll_active_face)
-    for m in reversed(_MODULES):
-        m.unregister()
+    for mod in reversed(_modules):
+        mod.unregister()
+    print("[GTA5 Pathing Editor] Addon désactivé.")
+
+
+if __name__ == "__main__":
+    register()
