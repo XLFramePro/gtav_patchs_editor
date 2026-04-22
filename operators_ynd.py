@@ -118,6 +118,48 @@ def _parse_ynd_xml(filepath, props):
                     lf2 = ival(link_el, "Flags2", 0)
                     _apply_link_flags(lk, lf0, lf1, lf2)
 
+    junctions = []
+    junctions_el = root.find("Junctions")
+    if junctions_el is not None:
+        for junction_el in junctions_el.findall("Item"):
+            pos_el = junction_el.find("Position")
+            junctions.append({
+                "min_z": fval(junction_el, "MinZ", 0.0),
+                "max_z": fval(junction_el, "MaxZ", 0.0),
+                "pos_x": float(pos_el.get("x", 0.0)) if pos_el is not None else 0.0,
+                "pos_y": float(pos_el.get("y", 0.0)) if pos_el is not None else 0.0,
+                "size_x": ival(junction_el, "SizeX", 8),
+                "size_y": ival(junction_el, "SizeY", 8),
+                "heightmap": sval(junction_el, "Heightmap", "").strip(),
+            })
+
+    refs_el = root.find("JunctionRefs")
+    if refs_el is not None:
+        for ref_el in refs_el.findall("Item"):
+            junction_id = ival(ref_el, "JunctionID", -1)
+            if not (0 <= junction_id < len(junctions)):
+                continue
+
+            _index, node = _find_node_by_area_id(
+                props.nodes,
+                ival(ref_el, "AreaID", -1),
+                ival(ref_el, "NodeID", -1),
+            )
+            if node is None:
+                continue
+
+            junction = junctions[junction_id]
+            node.flags2.junction = True
+            node.flags5.has_junction_heightmap = True
+            node.junction.min_z = junction["min_z"]
+            node.junction.max_z = junction["max_z"]
+            node.junction.pos_x = junction["pos_x"]
+            node.junction.pos_y = junction["pos_y"]
+            node.junction.size_x = junction["size_x"]
+            node.junction.size_y = junction["size_y"]
+            node.junction.heightmap = junction["heightmap"]
+            node.junction.ref_unk0 = ival(ref_el, "Unk0", 0)
+
     props.stat_nodes   = len(props.nodes)
     props.stat_vehicle = sum(1 for n in props.nodes if _node_is_vehicle(n))
     props.stat_ped     = sum(1 for n in props.nodes if not _node_is_vehicle(n))
@@ -163,6 +205,393 @@ def _build_node_index_map(nodes):
     for i, n in enumerate(nodes):
         index_map[(int(n.area_id), int(n.node_id))] = i
     return index_map
+
+
+YND_CURVE_PRESETS = {
+    "TWO_LANES": {
+        "node": (2, 0, 0, 150, 3, 2),
+        "link": (4, 0, 72),
+    },
+    "ONE_EACH": {
+        "node": (2, 0, 0, 150, 3, 2),
+        "link": (4, 0, 36),
+    },
+    "CENTER_ONE": {
+        "node": (2, 0, 0, 150, 3, 2),
+        "link": (4, 0, 32),
+    },
+    "CENTER_TWO": {
+        "node": (2, 0, 0, 150, 3, 2),
+        "link": (4, 0, 64),
+    },
+    "CENTER_THREE": {
+        "node": (2, 0, 0, 150, 3, 2),
+        "link": (4, 0, 96),
+    },
+    "NO_TRAFFIC": {
+        "node": (2, 0, 0, 150, 3, 2),
+        "link": (4, 0, 32),
+    },
+    "BOATS": {
+        "node": (0, 0, 176, 212, 15, 2),
+        "link": (4, 0, 36),
+        "first_node": (0, 160, 180, 142, 15, 3),
+        "last_node": (0, 160, 180, 142, 15, 3),
+        "end_link": (0, 0, 36),
+    },
+    "PARKING": {
+        "node": (35, 0, 144, 10, 116, 2),
+        "link": (144, 8, 36),
+        "last_node": (35, 0, 144, 232, 116, 2),
+    },
+}
+
+
+def _calc_area_id_from_position(position):
+    """Convert world XY to GTA V YND area index on the 32x32 grid."""
+    x, y = float(position[0]), float(position[1])
+    cell_x = max(0, min(31, int(math.floor((x + 8192.0) / 512.0))))
+    cell_y = max(0, min(31, int(math.floor((y + 8192.0) / 512.0))))
+    return (cell_y * 32) + cell_x
+
+
+def _iter_curve_point_chains(curve_obj):
+    """Yield one world-space point chain per spline in a Blender Curve."""
+    for spline in curve_obj.data.splines:
+        points = []
+        if spline.type == "POLY":
+            for point in spline.points:
+                points.append(tuple(curve_obj.matrix_world @ Vector(point.co[:3])))
+        elif spline.type == "BEZIER":
+            for point in spline.bezier_points:
+                points.append(tuple(curve_obj.matrix_world @ point.co))
+        if points:
+            yield points
+
+
+def _preset_node_flags(preset_key, point_index, point_count):
+    preset = YND_CURVE_PRESETS[preset_key]
+    if preset_key == "BOATS":
+        if point_index == 0:
+            return preset["first_node"]
+        if point_index == point_count - 1:
+            return preset["last_node"]
+    if preset_key == "PARKING" and point_index == point_count - 1:
+        return preset["last_node"]
+    return preset["node"]
+
+
+def _preset_link_flags(preset_key, source_index, target_index, point_count):
+    preset = YND_CURVE_PRESETS[preset_key]
+    if preset_key == "BOATS":
+        if source_index in {0, point_count - 1} or target_index in {0, point_count - 1}:
+            return preset["end_link"]
+    return preset["link"]
+
+
+def _snapshot_curve_node_state(props):
+    """Capture generated curve node state so sync can preserve manual edits."""
+    snapshot = {}
+    fallback_index = 0
+
+    for node in props.nodes:
+        chain_index = int(getattr(node, "curve_chain_index", -1))
+        point_index = int(getattr(node, "curve_point_index", -1))
+        key = (chain_index, point_index) if chain_index >= 0 and point_index >= 0 else ("flat", fallback_index)
+        fallback_index += 1
+
+        node_state = {
+            "area_id": int(node.area_id),
+            "node_id": int(node.node_id),
+            "street_name": node.street_name,
+            "flags": _node_flags_to_ints(node),
+            "links": {},
+            "extra_links": [],
+            "junction": {
+                "min_z": float(node.junction.min_z),
+                "max_z": float(node.junction.max_z),
+                "pos_x": float(node.junction.pos_x),
+                "pos_y": float(node.junction.pos_y),
+                "size_x": int(node.junction.size_x),
+                "size_y": int(node.junction.size_y),
+                "heightmap": node.junction.heightmap,
+                "ref_unk0": int(node.junction.ref_unk0),
+            },
+        }
+
+        for link in node.links:
+            target_index, target = _find_node_by_area_id(props.nodes, link.to_area_id, link.to_node_id)
+            if target is None:
+                continue
+
+            target_chain = int(getattr(target, "curve_chain_index", -1))
+            target_point = int(getattr(target, "curve_point_index", -1))
+            if chain_index >= 0 and target_chain == chain_index and target_point >= 0:
+                delta = target_point - point_index
+                relation = "prev" if delta == -1 else "next" if delta == 1 else None
+            else:
+                relation = None
+
+            if relation is None:
+                target_key = _curve_node_key(target)
+                if target_key is not None:
+                    node_state["extra_links"].append({
+                        "target_key": target_key,
+                        "flags": _link_flags_to_ints(link),
+                        "length": int(link.link_length),
+                    })
+                continue
+
+            node_state["links"][relation] = {
+                "flags": _link_flags_to_ints(link),
+            }
+
+        snapshot[key] = node_state
+
+    return snapshot
+
+
+def _next_preserved_or_free_node_id(snapshot_state, used_by_area, area_id):
+    """Reuse previous node_id when possible, otherwise allocate a free one."""
+    used = used_by_area.setdefault(int(area_id), set())
+    if snapshot_state is not None and int(snapshot_state["area_id"]) == int(area_id):
+        old_id = int(snapshot_state["node_id"])
+        if old_id not in used:
+            used.add(old_id)
+            return old_id
+
+    node_id = 0
+    while node_id in used:
+        node_id += 1
+    used.add(node_id)
+    return node_id
+
+
+def _flat_curve_point_keys(point_chains):
+    flat_keys = []
+    for chain_index, chain in enumerate(point_chains):
+        for point_index, _position in enumerate(chain):
+            flat_keys.append((chain_index, point_index))
+    return flat_keys
+
+
+def _curve_node_key(node):
+    chain_index = int(getattr(node, "curve_chain_index", -1))
+    point_index = int(getattr(node, "curve_point_index", -1))
+    if chain_index < 0 or point_index < 0:
+        return None
+    return chain_index, point_index
+
+
+def _collect_curve_neighbor_relations(chain_index, point_index, point_count, bidirectional):
+    relations = []
+    if bidirectional and point_index > 0:
+        relations.append(("prev", (chain_index, point_index - 1)))
+    if point_index < point_count - 1:
+        relations.append(("next", (chain_index, point_index + 1)))
+    return relations
+
+
+def _populate_ynd_from_curve(curve_obj, props, preset_key, bidirectional=True, preserve_existing=False):
+    """Create a YND chain from a Blender curve using Max-like presets."""
+    point_chains = list(_iter_curve_point_chains(curve_obj))
+    total_points = sum(len(chain) for chain in point_chains)
+    if total_points < 2:
+        return False, "The active curve must contain at least 2 control points."
+    if preset_key == "PARKING" and total_points != 2:
+        return False, "Parking preset requires exactly 2 control points."
+
+    existing_state = _snapshot_curve_node_state(props) if preserve_existing else {}
+    if preserve_existing and existing_state:
+        flat_existing = list(existing_state.values())
+        flat_keys = _flat_curve_point_keys(point_chains)
+        if not any(isinstance(key[0], int) for key in existing_state.keys()) and len(flat_existing) == len(flat_keys):
+            existing_state = {flat_keys[i]: flat_existing[i] for i in range(len(flat_keys))}
+
+    props.nodes.clear()
+    created = []
+    created_by_key = {}
+    first_area_id = None
+    used_ids_by_area = {}
+
+    for chain_index, chain in enumerate(point_chains):
+        if len(chain) < 2:
+            continue
+
+        chain_nodes = []
+        for point_index, position in enumerate(chain):
+            area_id = _calc_area_id_from_position(position)
+            state_key = (chain_index, point_index)
+            previous_state = existing_state.get(state_key)
+            node_id = _next_preserved_or_free_node_id(previous_state, used_ids_by_area, area_id)
+            node = props.nodes.add()
+            node.area_id = area_id
+            node.node_id = node_id
+            node.curve_chain_index = chain_index
+            node.curve_point_index = point_index
+            node.position = position
+            if previous_state is not None:
+                node.street_name = previous_state["street_name"]
+                _apply_node_flags(node, *previous_state["flags"])
+                node.junction.min_z = previous_state["junction"]["min_z"]
+                node.junction.max_z = previous_state["junction"]["max_z"]
+                node.junction.pos_x = previous_state["junction"]["pos_x"]
+                node.junction.pos_y = previous_state["junction"]["pos_y"]
+                node.junction.size_x = previous_state["junction"]["size_x"]
+                node.junction.size_y = previous_state["junction"]["size_y"]
+                node.junction.heightmap = previous_state["junction"]["heightmap"]
+                node.junction.ref_unk0 = previous_state["junction"]["ref_unk0"]
+            else:
+                node.street_name = curve_obj.name
+                _apply_node_flags(node, *_preset_node_flags(preset_key, point_index, len(chain)))
+            chain_nodes.append(node)
+            created.append(node)
+            created_by_key[state_key] = node
+            if first_area_id is None:
+                first_area_id = area_id
+
+        for index, node in enumerate(chain_nodes):
+            neighbor_indices = []
+            if bidirectional and index > 0:
+                neighbor_indices.append(index - 1)
+            if index < len(chain_nodes) - 1:
+                neighbor_indices.append(index + 1)
+
+            for target_index in neighbor_indices:
+                target = chain_nodes[target_index]
+                link = node.links.add()
+                link.to_area_id = target.area_id
+                link.to_node_id = target.node_id
+                relation = "prev" if target_index < index else "next"
+                previous_link = existing_state.get((chain_index, index), {}).get("links", {}).get(relation)
+                default_length = int(min(255, max(1.0, (Vector(node.position) - Vector(target.position)).length)))
+                link.link_length = default_length
+                if previous_link is not None:
+                    _apply_link_flags(link, *previous_link["flags"])
+                else:
+                    _apply_link_flags(link, *_preset_link_flags(preset_key, index, target_index, len(chain_nodes)))
+
+    if preserve_existing:
+        for state_key, previous_state in existing_state.items():
+            node = created_by_key.get(state_key)
+            if node is None:
+                continue
+
+            existing_pairs = {
+                (int(link.to_area_id), int(link.to_node_id))
+                for link in node.links
+            }
+            for extra_link in previous_state.get("extra_links", []):
+                target = created_by_key.get(tuple(extra_link["target_key"]))
+                if target is None:
+                    continue
+                target_pair = (int(target.area_id), int(target.node_id))
+                if target_pair in existing_pairs:
+                    continue
+
+                link = node.links.add()
+                link.to_area_id = target.area_id
+                link.to_node_id = target.node_id
+                link.link_length = extra_link["length"]
+                _apply_link_flags(link, *extra_link["flags"])
+                existing_pairs.add(target_pair)
+
+    if not created:
+        return False, "The active curve must contain at least one spline with 2 control points."
+
+    props.area_id = first_area_id if first_area_id is not None else props.area_id
+    props.node_index = 0 if created else -1
+    _update_ynd_stats(props)
+    return True, f"Generated {len(created)} nodes from curve '{curve_obj.name}'"
+
+
+def _find_ynd_source_curve(context):
+    """Return the active curve, or the most recent tagged YND source curve."""
+    active = context.active_object
+    if active is not None and active.type == "CURVE":
+        return active
+
+    for obj in context.scene.objects:
+        if obj.type == "CURVE" and obj.get("ynd_type") == "source_curve":
+            return obj
+
+    return None
+
+
+def _recalc_all_link_lengths(props):
+    """Recalculate all link lengths from current node positions."""
+    pos_map = {
+        (int(node.area_id), int(node.node_id)): Vector(node.position)
+        for node in props.nodes
+    }
+    recalc = 0
+    for node in props.nodes:
+        src_pos = Vector(node.position)
+        for link in node.links:
+            dst_pos = pos_map.get((int(link.to_area_id), int(link.to_node_id)))
+            if dst_pos is None:
+                continue
+            link.link_length = min(255, max(1, int(round((src_pos - dst_pos).length))))
+            recalc += 1
+    return recalc
+
+
+def _update_curve_links_only(curve_obj, props, preset_key, bidirectional=True):
+    """Update only adjacency links for curve-tracked nodes and preserve manual extras."""
+    point_chains = list(_iter_curve_point_chains(curve_obj))
+    tracked_nodes = {
+        key: node
+        for node in props.nodes
+        for key in [_curve_node_key(node)]
+        if key is not None
+    }
+    expected_keys = _flat_curve_point_keys(point_chains)
+    if set(tracked_nodes.keys()) != set(expected_keys):
+        return False, "Curve topology changed; use Sync from Curve to rebuild nodes."
+
+    existing_state = _snapshot_curve_node_state(props)
+    for chain_index, chain in enumerate(point_chains):
+        for point_index, position in enumerate(chain):
+            node = tracked_nodes[(chain_index, point_index)]
+            node.position = position
+            node.links.clear()
+
+    for chain_index, chain in enumerate(point_chains):
+        point_count = len(chain)
+        for point_index in range(point_count):
+            node = tracked_nodes[(chain_index, point_index)]
+            previous_state = existing_state.get((chain_index, point_index), {})
+            for relation, target_key in _collect_curve_neighbor_relations(chain_index, point_index, point_count, bidirectional):
+                target = tracked_nodes[target_key]
+                link = node.links.add()
+                link.to_area_id = target.area_id
+                link.to_node_id = target.node_id
+                link.link_length = int(min(255, max(1.0, (Vector(node.position) - Vector(target.position)).length)))
+                preserved = previous_state.get("links", {}).get(relation)
+                if preserved is not None:
+                    _apply_link_flags(link, *preserved["flags"])
+                else:
+                    _apply_link_flags(link, *_preset_link_flags(preset_key, point_index, target_key[1], point_count))
+
+            existing_pairs = {
+                (int(link.to_area_id), int(link.to_node_id))
+                for link in node.links
+            }
+            for extra_link in previous_state.get("extra_links", []):
+                target = tracked_nodes.get(tuple(extra_link["target_key"]))
+                if target is None:
+                    continue
+                target_pair = (int(target.area_id), int(target.node_id))
+                if target_pair in existing_pairs:
+                    continue
+                link = node.links.add()
+                link.to_area_id = target.area_id
+                link.to_node_id = target.node_id
+                link.link_length = extra_link["length"]
+                _apply_link_flags(link, *extra_link["flags"])
+                existing_pairs.add(target_pair)
+
+    return True, f"Updated links for {len(tracked_nodes)} curve node(s)"
 
 
 def _find_node_index_for_object(obj, props, node_index_map):
@@ -396,7 +825,28 @@ def _build_ynd_xml(context, props):
             sub_val(litem, "Flags2", lf2)
             sub_val(litem, "LinkLength", lk.link_length)
 
-    ET.SubElement(root, "Junctions")
+    junction_nodes = [
+        node for node in props.nodes
+        if node.flags2.junction and node.flags5.has_junction_heightmap
+    ]
+    junctions_el = ET.SubElement(root, "Junctions")
+    refs_el = ET.SubElement(root, "JunctionRefs")
+    for junction_id, node in enumerate(junction_nodes):
+        junction_item = ET.SubElement(junctions_el, "Item")
+        position = ET.SubElement(junction_item, "Position")
+        position.set("x", f"{node.junction.pos_x:.6f}")
+        position.set("y", f"{node.junction.pos_y:.6f}")
+        sub_val(junction_item, "MinZ", node.junction.min_z)
+        sub_val(junction_item, "MaxZ", node.junction.max_z)
+        sub_val(junction_item, "SizeX", node.junction.size_x)
+        sub_val(junction_item, "SizeY", node.junction.size_y)
+        sub_text(junction_item, "Heightmap", node.junction.heightmap)
+
+        ref_item = ET.SubElement(refs_el, "Item")
+        sub_val(ref_item, "AreaID", node.area_id)
+        sub_val(ref_item, "NodeID", node.node_id)
+        sub_val(ref_item, "JunctionID", junction_id)
+        sub_val(ref_item, "Unk0", node.junction.ref_unk0)
     return to_xml_string(root)
 
 
@@ -643,6 +1093,169 @@ class YND_OT_LinkTwoNodes(Operator):
         return {"FINISHED"}
 
 
+class YND_OT_GenerateFromCurve(Operator):
+    """Generate YND nodes and links from the active Blender curve"""
+    bl_idname = "gta5_ynd.generate_from_curve"; bl_label = "Generate from Active Curve"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        return obj is not None and obj.type == "CURVE"
+
+    def execute(self, context):
+        curve_obj = context.active_object
+        props = context.scene.gta5_pathing.ynd
+        ok, msg = _populate_ynd_from_curve(
+            curve_obj,
+            props,
+            props.curve_preset,
+            bidirectional=props.curve_bidirectional,
+        )
+        if not ok:
+            self.report({"ERROR"}, msg)
+            return {"CANCELLED"}
+
+        col = _get_or_create_col(YND_COLLECTION)
+        for obj in list(col.objects):
+            bpy.data.objects.remove(obj, do_unlink=True)
+        _build_ynd_objects(props, col)
+
+        curve_obj["ynd_type"] = "source_curve"
+        curve_obj["ynd_curve_preset"] = props.curve_preset
+        curve_obj["ynd_curve_bidirectional"] = props.curve_bidirectional
+        self.report({"INFO"}, msg)
+        return {"FINISHED"}
+
+
+class YND_OT_SyncFromCurve(Operator):
+    """Rebuild YND nodes and links from the source Blender curve"""
+    bl_idname = "gta5_ynd.sync_from_curve"; bl_label = "Sync from Curve"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return _find_ynd_source_curve(context) is not None
+
+    def execute(self, context):
+        curve_obj = _find_ynd_source_curve(context)
+        if curve_obj is None:
+            self.report({"WARNING"}, "No YND source curve found.")
+            return {"CANCELLED"}
+
+        props = context.scene.gta5_pathing.ynd
+        preset_key = curve_obj.get("ynd_curve_preset", props.curve_preset)
+        bidirectional = bool(curve_obj.get("ynd_curve_bidirectional", props.curve_bidirectional))
+        props.curve_preset = preset_key
+        props.curve_bidirectional = bidirectional
+
+        ok, msg = _populate_ynd_from_curve(
+            curve_obj,
+            props,
+            preset_key,
+            bidirectional=bidirectional,
+            preserve_existing=True,
+        )
+        if not ok:
+            self.report({"ERROR"}, msg)
+            return {"CANCELLED"}
+
+        col = _get_or_create_col(YND_COLLECTION)
+        for obj in list(col.objects):
+            bpy.data.objects.remove(obj, do_unlink=True)
+        _build_ynd_objects(props, col)
+
+        curve_obj["ynd_type"] = "source_curve"
+        curve_obj["ynd_curve_preset"] = preset_key
+        curve_obj["ynd_curve_bidirectional"] = bidirectional
+        self.report({"INFO"}, msg.replace("Generated", "Synced"))
+        return {"FINISHED"}
+
+
+class YND_OT_UpdateLinksFromCurve(Operator):
+    """Rebuild only adjacency links from the source curve and preserve manual extras"""
+    bl_idname = "gta5_ynd.update_links_from_curve"; bl_label = "Update Links from Curve"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return _find_ynd_source_curve(context) is not None
+
+    def execute(self, context):
+        curve_obj = _find_ynd_source_curve(context)
+        if curve_obj is None:
+            self.report({"WARNING"}, "No YND source curve found.")
+            return {"CANCELLED"}
+
+        props = context.scene.gta5_pathing.ynd
+        preset_key = curve_obj.get("ynd_curve_preset", props.curve_preset)
+        bidirectional = bool(curve_obj.get("ynd_curve_bidirectional", props.curve_bidirectional))
+        props.curve_preset = preset_key
+        props.curve_bidirectional = bidirectional
+        ok, msg = _update_curve_links_only(curve_obj, props, preset_key, bidirectional=bidirectional)
+        if not ok:
+            self.report({"ERROR"}, msg)
+            return {"CANCELLED"}
+
+        _update_ynd_stats(props)
+        _refresh_ynd_link_objects(props)
+        self.report({"INFO"}, msg)
+        return {"FINISHED"}
+
+
+class YND_OT_SetOneWay(Operator):
+    """Make the active node one-way by removing reverse links targeting it"""
+    bl_idname = "gta5_ynd.set_one_way"; bl_label = "Set One-Way Links"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        p = context.scene.gta5_pathing.ynd
+        return 0 <= p.node_index < len(p.nodes)
+
+    def execute(self, context):
+        props = context.scene.gta5_pathing.ynd
+        node = props.nodes[props.node_index]
+        removed = _remove_links_targeting_node(props, node.area_id, node.node_id)
+        _refresh_ynd_link_objects(props)
+        self.report({"INFO"}, f"{removed} reverse link(s) removed - node is now one-way")
+        return {"FINISHED"}
+
+
+class YND_OT_RecalcLinkLengths(Operator):
+    """Recalculate all YND link lengths from current node positions"""
+    bl_idname = "gta5_ynd.recalc_link_lengths"; bl_label = "Recalculate Link Lengths"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        props = context.scene.gta5_pathing.ynd
+        recalc = _recalc_all_link_lengths(props)
+        _refresh_ynd_link_objects(props)
+        self.report({"INFO"}, f"{recalc} link length(s) recalculated")
+        return {"FINISHED"}
+
+
+class YND_OT_ApplyRoadPreset(Operator):
+    """Apply the selected YND preset to the active node and its links"""
+    bl_idname = "gta5_ynd.apply_road_preset"; bl_label = "Apply Road Preset"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        p = context.scene.gta5_pathing.ynd
+        return 0 <= p.node_index < len(p.nodes)
+
+    def execute(self, context):
+        props = context.scene.gta5_pathing.ynd
+        node = props.nodes[props.node_index]
+        preset_key = props.curve_preset
+        _apply_node_flags(node, *_preset_node_flags(preset_key, 0, 2))
+        for link_index, link in enumerate(node.links):
+            _apply_link_flags(link, *_preset_link_flags(preset_key, link_index, link_index + 1, max(2, len(node.links) + 1)))
+        self.report({"INFO"}, f"Preset '{preset_key}' applied to node {node.area_id}:{node.node_id}")
+        return {"FINISHED"}
+
+
 class YND_OT_SyncFromObjects(Operator):
     """Syncs node positions from Blender empties"""
     bl_idname = "gta5_ynd.sync_from_objects"; bl_label = "Sync from Objects"
@@ -688,7 +1301,8 @@ _classes = [
     YND_OT_Import, YND_OT_Export,
     YND_OT_AddVehicleNode, YND_OT_AddPedNode, YND_OT_RemoveNode,
     YND_OT_AddLink, YND_OT_RemoveLink, YND_OT_RemoveAllLinks,
-    YND_OT_LinkTwoNodes, YND_OT_SyncFromObjects, YND_OT_RepairLocalIds,
+    YND_OT_LinkTwoNodes, YND_OT_GenerateFromCurve, YND_OT_SyncFromCurve, YND_OT_UpdateLinksFromCurve, YND_OT_SetOneWay,
+    YND_OT_RecalcLinkLengths, YND_OT_ApplyRoadPreset, YND_OT_SyncFromObjects, YND_OT_RepairLocalIds,
 ]
 
 def register():

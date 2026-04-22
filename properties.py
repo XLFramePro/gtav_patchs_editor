@@ -217,6 +217,7 @@ class YND_JunctionProps(PropertyGroup):
     pos_y:    FloatProperty(name="Pos Y", default=0.0)
     size_x:   IntProperty(name="Size X",  default=8, min=1)
     size_y:   IntProperty(name="Size Y",  default=8, min=1)
+    ref_unk0: IntProperty(name="Ref Unk0", default=0)
     heightmap:StringProperty(name="Heightmap", default="")
 
 
@@ -240,6 +241,8 @@ class YND_LinkItem(PropertyGroup):
 class YND_NodeItem(PropertyGroup):
     area_id:    IntProperty(name="Area ID",  default=400)
     node_id:    IntProperty(name="Node ID",  default=0)
+    curve_chain_index: IntProperty(default=-1)
+    curve_point_index: IntProperty(default=-1)
     street_name:StringProperty(name="Street",   default="")
     position:   FloatVectorProperty(name="Position", size=3, default=(0,0,0), precision=5)
     flags0:     PointerProperty(type=YND_NodeFlags0, name="Flags 0")
@@ -267,6 +270,21 @@ class YND_NodeItem(PropertyGroup):
 class YND_Props(PropertyGroup):
     filepath:           StringProperty(name="File", subtype="FILE_PATH", default="")
     area_id:            IntProperty(name="Area ID", default=400)
+    curve_bidirectional: BoolProperty(name="Bidirectional Links", default=True)
+    curve_preset:       EnumProperty(
+        name="Curve Preset",
+        items=[
+            ("TWO_LANES", "2 Lanes L | 2 Lanes R", "Default 2x2 road"),
+            ("ONE_EACH", "1 Lanes L | 1 Lanes R", "One lane per direction"),
+            ("CENTER_ONE", "One center lane", "Single centered traffic lane"),
+            ("CENTER_TWO", "Two center lane", "Two centered traffic lanes"),
+            ("CENTER_THREE", "Three center lane", "Three centered traffic lanes"),
+            ("NO_TRAFFIC", "One lane - no Traffic", "Lane with no traffic hints"),
+            ("BOATS", "Boats", "Boat path defaults"),
+            ("PARKING", "Parking", "Parking pair, requires exactly 2 points"),
+        ],
+        default="TWO_LANES",
+    )
     vehicle_node_count: IntProperty(default=0)
     ped_node_count:     IntProperty(default=0)
     nodes:              CollectionProperty(type=YND_NodeItem)

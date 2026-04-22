@@ -263,6 +263,19 @@ def _draw_ynd(layout, context, props):
     row.operator("gta5_ynd.sync_from_objects", text="Sync from Objects", icon="FILE_REFRESH")
     row.operator("gta5_ynd.repair_local_ids", text="Repair Local IDs", icon="TOOL_SETTINGS")
 
+    box = layout.box()
+    box.label(text="Curve Workflow", icon="CURVE_PATH")
+    box.prop(props, "curve_bidirectional", text="Bidirectional Links")
+    box.prop(props, "curve_preset", text="Preset")
+    row = box.row(align=True)
+    row.operator("gta5_ynd.sync_from_curve", text="Sync from Curve", icon="FILE_REFRESH")
+    row.operator("gta5_ynd.generate_from_curve", text="Generate from Active Curve", icon="CURVE_BEZCURVE")
+    row = box.row(align=True)
+    row.operator("gta5_ynd.update_links_from_curve", text="Update Links from Curve", icon="MOD_ARRAY")
+    row.operator("gta5_ynd.recalc_link_lengths", text="Recalc Lengths", icon="DRIVER_DISTANCE")
+    row = box.row(align=True)
+    row.operator("gta5_ynd.apply_road_preset", text="Apply Preset to Active Node", icon="CHECKMARK")
+
     # Nodes
     box = layout.box()
     box.label(text="Nodes", icon="EMPTY_ARROWS")
@@ -343,7 +356,8 @@ def _draw_ynd(layout, context, props):
             row = jct_box.row(align=True)
             row.prop(jct, "size_x")
             row.prop(jct, "size_y")
-            jct_box.label(text="Use CodeWalker to generate heightmap", icon="ERROR")
+            jct_box.prop(jct, "ref_unk0")
+            jct_box.prop(jct, "heightmap")
 
         # Links
         sub3 = sub.box()
@@ -351,6 +365,7 @@ def _draw_ynd(layout, context, props):
         row = sub3.row(align=True)
         row.operator("gta5_ynd.add_link", text="Add Link", icon="ADD")
         row.operator("gta5_ynd.link_two_nodes", text="Link to...", icon="LINKED")
+        row.operator("gta5_ynd.set_one_way", text="One-Way", icon="TRACKING_BACKWARDS")
         row.operator("gta5_ynd.remove_all_links", text="Remove All", icon="TRASH")
 
         row = sub3.row()
