@@ -6,21 +6,8 @@ import bpy, bmesh, json, xml.etree.ElementTree as ET, math, os
 from bpy.types import Operator
 from bpy.props import StringProperty, BoolProperty, IntProperty, FloatProperty
 from mathutils import Vector
-from .xml_utils import fval, ival, sval, sub_val, sub_text, to_xml_string
-
-YNV_COLLECTION = "YNV_NavMesh"
-
-FLAG_PRESETS = {
-    "ROAD":      (0,   0, 2, 0),
-    "PAVEMENT":  (4,   0, 0, 0),
-    "INTERIOR":  (0,  32, 0, 0),
-    "WATER":     (128, 0, 0, 0),
-    "SHALLOW":   (0,   0,16, 0),
-    "TRAIN":     (0,   0, 8, 0),
-    "COVER":     (0,   0, 2,63),
-    "SPAWN":     (0,   0, 3, 0),
-    "CUSTOM":    (0,   0, 0, 0),
-}
+from ..shared.xml_utils import fval, ival, sval, sub_val, sub_text, to_xml_string
+from .constants import YNV_COLLECTION, FLAG_PRESETS
 
 def _flag_label_parts(b0, b1, b2, b3):
     """Returns a list of strings describing active flags."""
@@ -383,6 +370,14 @@ def _build_ynv_root(name, col):
     return root
 
 
+def _compose_navmesh_root_name(props):
+    return f"{props.navmesh_name_prefix}[{props.navmesh_name_x}][{props.navmesh_name_y}]"
+
+
+def _find_ynv_root(context):
+    return next((o for o in context.scene.objects if o.get("ynv_type") == "root"), None)
+
+
 def _build_navmesh_obj(polygons_data, area_id):
     """Builds the Blender mesh with shared materials per (b0,b1,b2,b3)."""
     vert_map    = {}
@@ -690,6 +685,22 @@ def _normalize_poly_portal_links(poly_portal_links, poly_count):
     return normalized
 
 
+def _find_navmesh_poly_obj(context):
+    """Return active navmesh mesh when possible, fallback to scene search."""
+    active = context.active_object
+    if active is not None and active.type == "MESH" and active.get("ynv_type") == "poly_mesh":
+        return active
+
+    return next(
+        (
+            o
+            for o in context.scene.objects
+            if o.type == "MESH" and o.get("ynv_type") == "poly_mesh"
+        ),
+        None,
+    )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  EXPORT XML
 # ─────────────────────────────────────────────────────────────────────────────
@@ -710,7 +721,7 @@ def _build_ynv_xml(context, props):
     bb_size.set("z", f"{props.bb_max[2]-props.bb_min[2]:.7g}")
 
     polys_el   = ET.SubElement(root, "Polygons")
-    poly_obj   = next((o for o in context.scene.objects if o.get("ynv_type") == "poly_mesh"), None)
+    poly_obj   = _find_navmesh_poly_obj(context)
     poly_count = 0
     if poly_obj and poly_obj.type == "MESH":
         mesh = poly_obj.data
@@ -888,12 +899,20 @@ def _read_selected_face_flags(context, props):
     else:
         b0, b1, b2, b3 = 0, 0, 0, 0
 
-    # Retrieve b4-b5 from the object's JSON custom prop
+    # Retrieve b4-b5-b6 from the object's JSON custom prop
     try:
-        b45_data = json.loads(obj.get("ynv_bytes45", "[]"))
-        b4, b5   = b45_data[fi] if fi < len(b45_data) else (0, 0)
+        b456_data = json.loads(obj.get("ynv_bytes456", "[]"))
+        if fi < len(b456_data) and isinstance(b456_data[fi], (list, tuple)):
+            trip = list(b456_data[fi])
+            while len(trip) < 3:
+                trip.append(0)
+            b4, b5, b6 = int(trip[0]), int(trip[1]), int(trip[2])
+        else:
+            b4, b5, b6 = 0, 0, 0
     except Exception:
-        b4, b5 = 0, 0
+        b4, b5, b6 = 0, 0, 0
+
+    props.part_id_current = b6
 
     # Apply to PropertyGroup flags
     pf = props.selected_poly_flags
@@ -903,12 +922,235 @@ def _read_selected_face_flags(context, props):
 
     mat_name = mat.name if mat else "(none)"
     labels   = " + ".join(_flag_label_parts(b0, b1, b2, b3))
-    return True, f"Face {fi} : [{b0} {b1} {b2} {b3}] {labels} | b4={b4} b5={b5}"
+    return True, f"Face {fi} : [{b0} {b1} {b2} {b3}] {labels} | b4={b4} b5={b5} part={b6}"
+
+
+def _ensure_b456_for_mesh(obj):
+    mesh = obj.data
+    try:
+        b456_data = json.loads(obj.get("ynv_bytes456", "[]"))
+    except Exception:
+        b456_data = []
+    if not isinstance(b456_data, list):
+        b456_data = []
+
+    while len(b456_data) < len(mesh.polygons):
+        b456_data.append([0, 0, 0])
+    if len(b456_data) > len(mesh.polygons):
+        b456_data = b456_data[:len(mesh.polygons)]
+    for i, trip in enumerate(b456_data):
+        if not isinstance(trip, (list, tuple)):
+            b456_data[i] = [0, 0, 0]
+            continue
+        t = list(trip)
+        while len(t) < 3:
+            t.append(0)
+        b456_data[i] = [int(t[0]), int(t[1]), int(t[2])]
+    return b456_data
+
+
+def _get_active_poly_mesh(context):
+    obj = context.active_object
+    if obj is not None and obj.type == "MESH" and obj.get("ynv_type") == "poly_mesh":
+        return obj
+    return next((o for o in context.scene.objects if o.get("ynv_type") == "poly_mesh" and o.type == "MESH"), None)
+
+
+from .builders import (
+    _apply_flags_to_selection,
+    _build_navmesh_obj,
+    _build_navpoints_objs,
+    _build_portals_objs,
+    _build_ynv_root,
+    _compose_navmesh_root_name,
+    _ensure_b456_for_mesh,
+    _find_ynv_root,
+    _flag_label_parts,
+    _get_or_create_col,
+    _get_or_create_material,
+    _link_obj,
+    _read_selected_face_flags,
+    _refresh_navpoints_objects,
+    _sync_navpoints_from_objects,
+)
+from .io import (
+    _build_ynv_xml,
+    _normalize_poly_portal_links,
+    _parse_flags_str,
+    _parse_ynv_xml,
+    _sanitize_portals_for_poly_count,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # OPERATORS
 # ─────────────────────────────────────────────────────────────────────────────
+
+class YNV_OT_New(Operator):
+    """Create a new empty YNV workspace in Blender"""
+    bl_idname  = "gta5_ynv.new_file"; bl_label = "New YNV"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        props = context.scene.gta5_pathing.ynv
+        props.filepath = ""
+        props.portals.clear()
+        props.nav_points.clear()
+        props.portal_index = -1
+        props.nav_point_index = -1
+        props.stat_polygons = 0
+        props.stat_portals = 0
+        props.stat_navpoints = 0
+        props.bb_min = (0.0, 0.0, 0.0)
+        props.bb_max = (0.0, 0.0, 0.0)
+
+        col = _get_or_create_col(YNV_COLLECTION)
+        for obj in list(col.objects):
+            bpy.data.objects.remove(obj, do_unlink=True)
+
+        root_obj = _build_ynv_root(_compose_navmesh_root_name(props), col)
+        root_obj["ynv_area_id"] = props.area_id
+        portals_root = _build_portals_objs(props, col)
+        portals_root.parent = root_obj
+        points_root = _build_navpoints_objs(props, col)
+        points_root.parent = root_obj
+
+        self.report({"INFO"}, "New empty YNV created")
+        return {"FINISHED"}
+
+
+class YNV_OT_CreateNavmesh(Operator):
+    """Create an empty navmesh root and mesh"""
+    bl_idname = "gta5_ynv.create_navmesh"; bl_label = "Create a Navmesh"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        props = context.scene.gta5_pathing.ynv
+        col = _get_or_create_col(YNV_COLLECTION)
+
+        root = _find_ynv_root(context)
+        if root is None:
+            root = _build_ynv_root(_compose_navmesh_root_name(props), col)
+        root["ynv_area_id"] = props.area_id
+
+        poly_obj = next((o for o in context.scene.objects if o.get("ynv_type") == "poly_mesh" and o.type == "MESH"), None)
+        if poly_obj is None:
+            mesh = bpy.data.meshes.new("NavMesh Poly Mesh")
+            poly_obj = bpy.data.objects.new("NavMesh Poly Mesh", mesh)
+            poly_obj["ynv_type"] = "poly_mesh"
+            poly_obj["ynv_area_id"] = props.area_id
+            poly_obj["ynv_bytes45"] = "[]"
+            poly_obj["ynv_bytes456"] = "[]"
+            poly_obj["ynv_edge_lines"] = "[]"
+            poly_obj["ynv_edge_flag_lines"] = "[]"
+            poly_obj["ynv_poly_portals"] = "[]"
+            _link_obj(poly_obj, col)
+        poly_obj.parent = root
+
+        portals_root = next((o for o in col.objects if o.get("ynv_type") == "portals_root"), None)
+        if portals_root is None:
+            portals_root = _build_portals_objs(props, col)
+        portals_root.parent = root
+
+        points_root = next((o for o in col.objects if o.get("ynv_type") == "navpoints_root"), None)
+        if points_root is None:
+            points_root = _build_navpoints_objs(props, col)
+        points_root.parent = root
+
+        self.report({"INFO"}, "Navmesh root created")
+        return {"FINISHED"}
+
+
+class YNV_OT_ConvertToNavmesh(Operator):
+    """Tag the active mesh as YNV navmesh mesh"""
+    bl_idname = "gta5_ynv.convert_to_navmesh"; bl_label = "Convert to Navmesh"
+    bl_options = {"REGISTER", "UNDO"}
+
+    mesh_only: BoolProperty(name="Mesh only", default=False)
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        return obj is not None and obj.type == "MESH"
+
+    def execute(self, context):
+        props = context.scene.gta5_pathing.ynv
+        obj = context.active_object
+        col = _get_or_create_col(YNV_COLLECTION)
+
+        obj["ynv_type"] = "poly_mesh"
+        obj["ynv_area_id"] = props.area_id
+        if "ynv_bytes45" not in obj:
+            obj["ynv_bytes45"] = "[]"
+        if "ynv_bytes456" not in obj:
+            obj["ynv_bytes456"] = "[]"
+        if "ynv_edge_lines" not in obj:
+            obj["ynv_edge_lines"] = "[]"
+        if "ynv_edge_flag_lines" not in obj:
+            obj["ynv_edge_flag_lines"] = "[]"
+        if "ynv_poly_portals" not in obj:
+            obj["ynv_poly_portals"] = "[]"
+
+        _link_obj(obj, col)
+
+        if not self.mesh_only:
+            root = _find_ynv_root(context)
+            if root is None:
+                root = _build_ynv_root(_compose_navmesh_root_name(props), col)
+            root["ynv_area_id"] = props.area_id
+            obj.parent = root
+
+            portals_root = next((o for o in col.objects if o.get("ynv_type") == "portals_root"), None)
+            if portals_root is None:
+                portals_root = _build_portals_objs(props, col)
+            portals_root.parent = root
+
+            points_root = next((o for o in col.objects if o.get("ynv_type") == "navpoints_root"), None)
+            if points_root is None:
+                points_root = _build_navpoints_objs(props, col)
+            points_root.parent = root
+
+        props.stat_polygons = len(obj.data.polygons)
+        self.report({"INFO"}, "Mesh converted to navmesh")
+        return {"FINISHED"}
+
+
+class YNV_OT_ApplyAreaId(Operator):
+    """Apply Area ID to current YNV root and mesh"""
+    bl_idname = "gta5_ynv.apply_area_id"; bl_label = "Apply Area ID"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        props = context.scene.gta5_pathing.ynv
+        props.area_id = int(props.area_id_new)
+
+        root = _find_ynv_root(context)
+        if root is not None:
+            root["ynv_area_id"] = props.area_id
+
+        poly_obj = next((o for o in context.scene.objects if o.get("ynv_type") == "poly_mesh" and o.type == "MESH"), None)
+        if poly_obj is not None:
+            poly_obj["ynv_area_id"] = props.area_id
+
+        self.report({"INFO"}, f"Area ID applied: {props.area_id}")
+        return {"FINISHED"}
+
+
+class YNV_OT_AutoAreaId(Operator):
+    """Auto compute area id using tile grid and cursor position"""
+    bl_idname = "gta5_ynv.auto_area_id"; bl_label = "Auto Area ID"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        props = context.scene.gta5_pathing.ynv
+        cursor = context.scene.cursor.location
+        x = int(math.floor((cursor.x - props.offset_x) / max(1.0, props.tile_size)))
+        y = int(math.floor((cursor.y - props.offset_y) / max(1.0, props.tile_size)))
+        props.area_id_new = max(0, y * 100 + x)
+        props.navmesh_name_x = x
+        props.navmesh_name_y = y
+        self.report({"INFO"}, f"Auto Area ID: {props.area_id_new} (x={x}, y={y})")
+        return {"FINISHED"}
 
 class YNV_OT_Import(Operator):
     """Import a navmesh YNV XML file into Blender"""
@@ -919,39 +1161,8 @@ class YNV_OT_Import(Operator):
     def invoke(self, context, event):
         context.window_manager.fileselect_add(self); return {"RUNNING_MODAL"}
     def execute(self, context):
-        props = context.scene.gta5_pathing.ynv
-        ok, msg, polygons_data = _parse_ynv_xml(self.filepath, props)
-        if not ok: self.report({"ERROR"}, msg); return {"CANCELLED"}
-        props.filepath = self.filepath
-        col = _get_or_create_col(YNV_COLLECTION)
-        for obj in list(col.objects):
-            bpy.data.objects.remove(obj, do_unlink=True)
-
-        base_name = os.path.basename(self.filepath)
-        lower_name = base_name.lower()
-        if lower_name.endswith(".ynv.xml"):
-            root_name = base_name[:-8]
-        else:
-            root_name = os.path.splitext(base_name)[0]
-        root_obj = _build_ynv_root(root_name, col)
-
-        if polygons_data:
-            poly_obj = _build_navmesh_obj(polygons_data, props.area_id)
-            _link_obj(poly_obj, col)
-            poly_obj.parent = root_obj
-
-        portals_root = _build_portals_objs(props, col)
-        portals_root.parent = root_obj
-        points_root = _build_navpoints_objs(props, col)
-        points_root.parent = root_obj
-
-        n_mats = len(set(m.name for m in bpy.data.materials if m.name.startswith("YNV_")))
-        self.report({"INFO"},
-            f"YNV imported: {props.stat_polygons} polygons, "
-            f"{n_mats} unique materials, "
-            f"{props.stat_portals} portals, "
-            f"{props.stat_navpoints} points")
-        return {"FINISHED"}
+        self.report({"WARNING"}, "Import is disabled in Creator mode. Use 'New YNV'.")
+        return {"CANCELLED"}
 
 
 class YNV_OT_Export(Operator):
@@ -966,7 +1177,7 @@ class YNV_OT_Export(Operator):
         context.window_manager.fileselect_add(self); return {"RUNNING_MODAL"}
     def execute(self, context):
         props = context.scene.gta5_pathing.ynv
-        poly_obj = next((o for o in context.scene.objects if o.get("ynv_type") == "poly_mesh" and o.type == "MESH"), None)
+        poly_obj = _find_navmesh_poly_obj(context)
         poly_count = len(poly_obj.data.polygons) if poly_obj is not None else 0
         removed_portals = _sanitize_portals_for_poly_count(props, poly_count)
         if removed_portals:
@@ -1156,6 +1367,238 @@ class YNV_OT_AddPortal(Operator):
         p.pos_from = (c.x, c.y, c.z); p.pos_to = (c.x + 1, c.y, c.z + 5)
         props.portal_index = len(props.portals) - 1
         props.stat_portals = len(props.portals)
+        props.portal_new_type = p.portal_type
+        props.portal_new_angle = p.angle
+        props.portal_new_poly_from = p.poly_from
+        props.portal_new_poly_to = p.poly_to
+        props.portal_new_pos_from = tuple(p.pos_from)
+        props.portal_new_pos_to = tuple(p.pos_to)
+        return {"FINISHED"}
+
+
+class YNV_OT_UseCurrentNavPointType(Operator):
+    """Copy selected nav point type to New Type field"""
+    bl_idname = "gta5_ynv.use_current_navpoint_type"; bl_label = "Use Current Nav Point Type"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        props = context.scene.gta5_pathing.ynv
+        return 0 <= props.nav_point_index < len(props.nav_points)
+
+    def execute(self, context):
+        props = context.scene.gta5_pathing.ynv
+        props.navpoint_new_type = int(props.nav_points[props.nav_point_index].point_type)
+        self.report({"INFO"}, f"New Type set to {props.navpoint_new_type}")
+        return {"FINISHED"}
+
+
+class YNV_OT_ApplyNewNavPointType(Operator):
+    """Apply New Type to selected nav point"""
+    bl_idname = "gta5_ynv.apply_new_navpoint_type"; bl_label = "Apply New Nav Point Type"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        props = context.scene.gta5_pathing.ynv
+        return 0 <= props.nav_point_index < len(props.nav_points)
+
+    def execute(self, context):
+        props = context.scene.gta5_pathing.ynv
+        idx = props.nav_point_index
+        np_item = props.nav_points[idx]
+        np_item.point_type = int(props.navpoint_new_type)
+
+        nav_obj = next((o for o in context.scene.objects if o.get("ynv_type") == "nav_point" and int(o.get("point_index", -1)) == idx), None)
+        if nav_obj is not None:
+            nav_obj["point_type"] = int(np_item.point_type)
+
+        self.report({"INFO"}, f"Nav point {idx} type -> {np_item.point_type}")
+        return {"FINISHED"}
+
+
+class YNV_OT_UseCurrentPortalData(Operator):
+    """Copy selected portal fields to editable New data"""
+    bl_idname = "gta5_ynv.use_current_portal_data"; bl_label = "Use Current Portal Data"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        props = context.scene.gta5_pathing.ynv
+        return 0 <= props.portal_index < len(props.portals)
+
+    def execute(self, context):
+        props = context.scene.gta5_pathing.ynv
+        p = props.portals[props.portal_index]
+        props.portal_new_type = int(p.portal_type)
+        props.portal_new_angle = float(p.angle)
+        props.portal_new_poly_from = int(p.poly_from)
+        props.portal_new_poly_to = int(p.poly_to)
+        props.portal_new_pos_from = tuple(p.pos_from)
+        props.portal_new_pos_to = tuple(p.pos_to)
+        self.report({"INFO"}, "Portal data copied to New fields")
+        return {"FINISHED"}
+
+
+class YNV_OT_ApplyNewPortalData(Operator):
+    """Apply editable New portal data to selected portal"""
+    bl_idname = "gta5_ynv.apply_new_portal_data"; bl_label = "Apply New Portal Data"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        props = context.scene.gta5_pathing.ynv
+        return 0 <= props.portal_index < len(props.portals)
+
+    def execute(self, context):
+        props = context.scene.gta5_pathing.ynv
+        p = props.portals[props.portal_index]
+        p.portal_type = int(props.portal_new_type)
+        p.angle = float(props.portal_new_angle)
+        p.poly_from = int(props.portal_new_poly_from)
+        p.poly_to = int(props.portal_new_poly_to)
+        p.pos_from = tuple(props.portal_new_pos_from)
+        p.pos_to = tuple(props.portal_new_pos_to)
+
+        self.report({"INFO"}, f"Portal {props.portal_index} updated")
+        return {"FINISHED"}
+
+
+class YNV_OT_AddPortalLinks(Operator):
+    """Add selected portal index to selected navmesh faces"""
+    bl_idname = "gta5_ynv.add_portal_links"; bl_label = "Add Portal Lines"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        props = context.scene.gta5_pathing.ynv
+        obj = context.active_object
+        return (
+            obj is not None and obj.type == "MESH" and obj.get("ynv_type") == "poly_mesh"
+            and obj.mode == "EDIT" and 0 <= props.portal_index < len(props.portals)
+        )
+
+    def execute(self, context):
+        props = context.scene.gta5_pathing.ynv
+        obj = context.active_object
+        mesh = obj.data
+        bm = bmesh.from_edit_mesh(mesh)
+        selected_faces = [f.index for f in bm.faces if f.select]
+        if not selected_faces:
+            self.report({"WARNING"}, "Select at least one navmesh face in Edit Mode")
+            return {"CANCELLED"}
+
+        try:
+            poly_portals = json.loads(obj.get("ynv_poly_portals", "[]"))
+        except Exception:
+            poly_portals = []
+        poly_portals = _normalize_poly_portal_links(poly_portals, len(mesh.polygons))
+
+        portal_idx = int(props.portal_index)
+        changed = 0
+        for fi in selected_faces:
+            links = poly_portals[fi]
+            if portal_idx not in links:
+                links.append(portal_idx)
+                changed += 1
+
+        obj["ynv_poly_portals"] = json.dumps(poly_portals)
+        self.report({"INFO"}, f"Portal {portal_idx} linked to {changed} face(s)")
+        return {"FINISHED"}
+
+
+class YNV_OT_SelectFacesByPartId(Operator):
+    """Select all navmesh faces with current Part ID"""
+    bl_idname = "gta5_ynv.select_faces_part_id"; bl_label = "Select Faces With PartID"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        return obj is not None and obj.type == "MESH" and obj.get("ynv_type") == "poly_mesh" and obj.mode == "EDIT"
+
+    def execute(self, context):
+        props = context.scene.gta5_pathing.ynv
+        obj = context.active_object
+        b456_data = _ensure_b456_for_mesh(obj)
+        mesh = obj.data
+        bm = bmesh.from_edit_mesh(mesh)
+
+        target = int(props.part_id_value)
+        selected = 0
+        for f in bm.faces:
+            pid = int(b456_data[f.index][2]) if f.index < len(b456_data) else 0
+            f.select = (pid == target)
+            if f.select:
+                selected += 1
+        bmesh.update_edit_mesh(mesh)
+        props.part_id_current = target
+        self.report({"INFO"}, f"Selected {selected} face(s) with PartId={target}")
+        return {"FINISHED"}
+
+
+class YNV_OT_ApplyPartId(Operator):
+    """Apply Part ID to selected navmesh faces"""
+    bl_idname = "gta5_ynv.apply_part_id"; bl_label = "Apply PartId"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        return obj is not None and obj.type == "MESH" and obj.get("ynv_type") == "poly_mesh" and obj.mode == "EDIT"
+
+    def execute(self, context):
+        props = context.scene.gta5_pathing.ynv
+        obj = context.active_object
+        b456_data = _ensure_b456_for_mesh(obj)
+        mesh = obj.data
+        bm = bmesh.from_edit_mesh(mesh)
+
+        target = int(props.part_id_value)
+        changed = 0
+        for f in bm.faces:
+            if not f.select:
+                continue
+            if f.index >= len(b456_data):
+                continue
+            b456_data[f.index][2] = target
+            changed += 1
+
+        obj["ynv_bytes456"] = json.dumps(b456_data)
+        props.part_id_current = target
+        self.report({"INFO"}, f"Applied PartId={target} on {changed} face(s)")
+        return {"FINISHED"}
+
+
+class YNV_OT_ClearPartId(Operator):
+    """Clear Part ID on selected navmesh faces (set to 0)"""
+    bl_idname = "gta5_ynv.clear_part_id"; bl_label = "Clear PartId"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        return obj is not None and obj.type == "MESH" and obj.get("ynv_type") == "poly_mesh" and obj.mode == "EDIT"
+
+    def execute(self, context):
+        props = context.scene.gta5_pathing.ynv
+        obj = context.active_object
+        b456_data = _ensure_b456_for_mesh(obj)
+        mesh = obj.data
+        bm = bmesh.from_edit_mesh(mesh)
+
+        changed = 0
+        for f in bm.faces:
+            if not f.select:
+                continue
+            if f.index >= len(b456_data):
+                continue
+            b456_data[f.index][2] = 0
+            changed += 1
+
+        obj["ynv_bytes456"] = json.dumps(b456_data)
+        props.part_id_current = 0
+        self.report({"INFO"}, f"Cleared PartId on {changed} face(s)")
         return {"FINISHED"}
 
 
@@ -1224,7 +1667,7 @@ class YNV_OT_ComputeBBox(Operator):
     bl_options = {"REGISTER", "UNDO"}
     def execute(self, context):
         props    = context.scene.gta5_pathing.ynv
-        poly_obj = next((o for o in context.scene.objects if o.get("ynv_type") == "poly_mesh"), None)
+        poly_obj = _find_navmesh_poly_obj(context)
         if poly_obj is None or poly_obj.type != "MESH":
             self.report({"WARNING"}, "No YNV mesh"); return {"CANCELLED"}
         verts = [poly_obj.matrix_world @ v.co for v in poly_obj.data.vertices]
@@ -1236,20 +1679,214 @@ class YNV_OT_ComputeBBox(Operator):
 
 
 class YNV_OT_SplitMesh(Operator):
-    """Splits mesh according to Tile Size / Offset grid"""
+    """Split navmesh mesh into standard Blender mesh tiles"""
     bl_idname  = "gta5_ynv.split_mesh"; bl_label = "Split Mesh"
     bl_options = {"REGISTER", "UNDO"}
     def execute(self, context):
-        self.report({"INFO"}, "Split Mesh: use an external tool (CodeWalker) for tile splitting.")
+        props = context.scene.gta5_pathing.ynv
+        src_obj = _find_navmesh_poly_obj(context)
+        if src_obj is None or src_obj.type != "MESH":
+            self.report({"WARNING"}, "No navmesh mesh found to split")
+            return {"CANCELLED"}
+
+        tile_size = max(1.0, float(props.tile_size))
+        offset_x = float(props.offset_x)
+        offset_y = float(props.offset_y)
+        apply_decimate = bool(props.split_apply_decimate)
+        auto_decimate = bool(props.split_decimate_auto)
+        decimate_strength = max(0.0, min(1.0, float(props.split_decimate_strength)))
+        decimate_ratio = max(0.1, min(1.0, float(props.split_decimate_ratio)))
+
+        depsgraph = context.evaluated_depsgraph_get()
+        src_eval = src_obj.evaluated_get(depsgraph)
+        eval_mesh = src_eval.to_mesh()
+        if eval_mesh is None or not eval_mesh.polygons:
+            if eval_mesh is not None:
+                src_eval.to_mesh_clear()
+            self.report({"WARNING"}, "Source mesh has no polygons")
+            return {"CANCELLED"}
+
+        groups = {}
+        for poly in eval_mesh.polygons:
+            center_world = src_eval.matrix_world @ poly.center
+            tx = int(math.floor((center_world.x - offset_x) / tile_size))
+            ty = int(math.floor((center_world.y - offset_y) / tile_size))
+            groups.setdefault((tx, ty), []).append(poly.index)
+
+        if len(groups) <= 1:
+            src_eval.to_mesh_clear()
+            self.report({"INFO"}, "Mesh already fits in one tile")
+            return {"FINISHED"}
+
+        def _read_json_list(obj, key):
+            try:
+                data = json.loads(obj.get(key, "[]"))
+            except Exception:
+                return []
+            return data if isinstance(data, list) else []
+
+        src_b456 = _read_json_list(src_obj, "ynv_bytes456")
+        src_edge_lines = _read_json_list(src_obj, "ynv_edge_lines")
+        src_edge_flags = _read_json_list(src_obj, "ynv_edge_flag_lines")
+        src_poly_portals = _read_json_list(src_obj, "ynv_poly_portals")
+
+        target_col = src_obj.users_collection[0] if src_obj.users_collection else _get_or_create_col(YNV_COLLECTION)
+        created_objects = []
+
+        for (tx, ty), poly_indices in sorted(groups.items(), key=lambda kv: (kv[0][1], kv[0][0])):
+            bm = bmesh.new()
+            vmap = {}
+            src_poly_order = []
+
+            for src_poly_index in poly_indices:
+                poly = eval_mesh.polygons[src_poly_index]
+                face_verts = []
+                for vi in poly.vertices:
+                    v = vmap.get(vi)
+                    if v is None:
+                        v = bm.verts.new(eval_mesh.vertices[vi].co.copy())
+                        vmap[vi] = v
+                    face_verts.append(v)
+
+                try:
+                    face = bm.faces.new(face_verts)
+                except ValueError:
+                    continue
+                face.material_index = poly.material_index
+                src_poly_order.append(src_poly_index)
+
+            if not src_poly_order:
+                bm.free()
+                continue
+
+            new_mesh = bpy.data.meshes.new(f"YNV_Tile_{tx}_{ty}")
+            bm.to_mesh(new_mesh)
+            bm.free()
+            new_mesh.update()
+
+            for mat in src_obj.data.materials:
+                new_mesh.materials.append(mat)
+
+            tile_obj = bpy.data.objects.new(
+                f"{props.navmesh_name_prefix}[{tx}][{ty}]_mesh",
+                new_mesh,
+            )
+            tile_obj.matrix_world = src_obj.matrix_world.copy()
+            # Keep split results as regular meshes (no automatic NavMesh tagging).
+            tile_obj["split_tile_x"] = tx
+            tile_obj["split_tile_y"] = ty
+
+            b456_subset = [
+                src_b456[i] if 0 <= i < len(src_b456) else [0, 0, 0]
+                for i in src_poly_order
+            ]
+            edge_lines_subset = [
+                src_edge_lines[i] if 0 <= i < len(src_edge_lines) else ""
+                for i in src_poly_order
+            ]
+            edge_flags_subset = [
+                src_edge_flags[i] if 0 <= i < len(src_edge_flags) else ""
+                for i in src_poly_order
+            ]
+            poly_portals_subset = [
+                src_poly_portals[i] if 0 <= i < len(src_poly_portals) else []
+                for i in src_poly_order
+            ]
+
+            tile_obj["ynv_bytes456"] = json.dumps(b456_subset)
+            tile_obj["ynv_edge_lines"] = json.dumps(edge_lines_subset)
+            tile_obj["ynv_edge_flag_lines"] = json.dumps(edge_flags_subset)
+            tile_obj["ynv_poly_portals"] = json.dumps(poly_portals_subset)
+
+            _link_obj(tile_obj, target_col)
+            if src_obj.parent is not None:
+                tile_obj.parent = src_obj.parent
+            created_objects.append(tile_obj)
+
+        src_eval.to_mesh_clear()
+
+        if not created_objects:
+            self.report({"WARNING"}, "Split failed: no tile meshes were created")
+            return {"CANCELLED"}
+
+        decimated_count = 0
+        if apply_decimate and (auto_decimate or decimate_ratio < 0.999):
+            if context.mode != "OBJECT":
+                try:
+                    bpy.ops.object.mode_set(mode="OBJECT")
+                except Exception:
+                    pass
+
+            for tile_obj in created_objects:
+                ratio = decimate_ratio
+                if auto_decimate:
+                    mesh = tile_obj.data
+                    mesh.calc_loop_triangles()
+                    tri_count = len(mesh.loop_triangles)
+                    z_values = [v.co.z for v in mesh.vertices]
+                    z_range = (max(z_values) - min(z_values)) if z_values else 0.0
+
+                    # Auto rule: simplify mostly flat + dense tiles, preserve rough terrain more.
+                    density_norm = min(1.0, tri_count / 700.0)
+                    relief_norm = min(1.0, z_range / max(1.0, tile_size * 0.18))
+                    flatness = 1.0 - relief_norm
+                    aggressiveness = density_norm * (0.35 + (0.65 * flatness))
+                    ratio = 1.0 - (decimate_strength * aggressiveness)
+                    ratio = max(0.22, min(0.95, ratio))
+                if ratio >= 0.999:
+                    continue
+
+                mod = tile_obj.modifiers.new(name="SplitDecimate", type="DECIMATE")
+                mod.decimate_type = "COLLAPSE"
+                mod.ratio = ratio
+                mod.use_collapse_triangulate = True
+                context.view_layer.objects.active = tile_obj
+                tile_obj.select_set(True)
+                try:
+                    bpy.ops.object.modifier_apply(modifier=mod.name)
+                    decimated_count += 1
+                except Exception:
+                    try:
+                        tile_obj.modifiers.remove(mod)
+                    except Exception:
+                        pass
+
+        src_obj.hide_set(True)
+        src_obj.hide_render = True
+
+        for obj in context.selected_objects:
+            obj.select_set(False)
+        for obj in created_objects:
+            obj.select_set(True)
+        context.view_layer.objects.active = created_objects[0]
+
+        if decimated_count:
+            mode_desc = (
+                f"auto strength={decimate_strength:.2f}" if auto_decimate else f"manual ratio={decimate_ratio:.2f}"
+            )
+            self.report(
+                {"INFO"},
+                f"Split complete: {len(created_objects)} tile mesh(es), decimate applied on {decimated_count} tile(s) ({mode_desc})",
+            )
+        else:
+            self.report({"INFO"}, f"Split complete: {len(created_objects)} tile mesh(es) created")
         return {"FINISHED"}
 
 
 _classes = [
+    YNV_OT_New,
+    YNV_OT_CreateNavmesh,
+    YNV_OT_ConvertToNavmesh,
+    YNV_OT_ApplyAreaId,
+    YNV_OT_AutoAreaId,
     YNV_OT_Import, YNV_OT_Export,
     YNV_OT_ReadSelectedFlags, YNV_OT_ApplyFlagsPreset, YNV_OT_ApplyCustomFlags,
     YNV_OT_AddPolygon,
     YNV_OT_AddPortal,    YNV_OT_RemovePortal,
+    YNV_OT_UseCurrentPortalData, YNV_OT_ApplyNewPortalData, YNV_OT_AddPortalLinks,
     YNV_OT_AddNavPoint,  YNV_OT_RemoveNavPoint,
+    YNV_OT_UseCurrentNavPointType, YNV_OT_ApplyNewNavPointType,
+    YNV_OT_SelectFacesByPartId, YNV_OT_ApplyPartId, YNV_OT_ClearPartId,
     YNV_OT_SyncFromObjects, YNV_OT_ComputeBBox, YNV_OT_SplitMesh,
 ]
 

@@ -26,23 +26,23 @@ bl_info = {
 import bpy
 
 from . import (
-    properties,
-    operators_ynv,
-    operators_ynd,
-    operators_ymt,
-    operators_trains,
-    ui,
-    draw_handler,
+    shared,
+    ynv,
+    ynd,
+    ymt,
+    trains,
+    panels,
+    viewport,
 )
 
 _modules = [
-    properties,
-    operators_ynv,
-    operators_ynd,
-    operators_ymt,
-    operators_trains,
-    ui,
-    draw_handler,
+    shared,
+    ynv,
+    ynd,
+    ymt,
+    trains,
+    panels,
+    viewport,
 ]
 
 

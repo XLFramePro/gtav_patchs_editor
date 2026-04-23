@@ -4,7 +4,7 @@ ui.py — N-Panel GTA V Pathing Editor with complete YND panel
 """
 import bpy
 from bpy.types import Panel, UIList
-from .operators_ynv import _read_selected_face_flags
+from ..ynv.operators import _read_selected_face_flags
 
 
 def update_ynv_flags():
@@ -33,7 +33,7 @@ class GTA5_UL_YNV_NavPoints(UIList):
 
 class GTA5_UL_YND_Nodes(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_prop, index):
-        from .properties import PED_SPECIAL_TYPES
+        from ..shared.properties import PED_SPECIAL_TYPES
         is_ped = item.flags1.special_type in PED_SPECIAL_TYPES
         ic = "USER" if is_ped else "AUTO"
         sp = item.flags1.special_type
@@ -56,7 +56,7 @@ class GTA5_UL_YND_Links(UIList):
 
 class GTA5_UL_YMT_ScenarioPoints(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_prop, index):
-        from .operators_ymt import ITYPE_NAMES
+        from ..ymt.operators import ITYPE_NAMES
         tname = ITYPE_NAMES.get(item.itype, f"t{item.itype}")
         layout.label(text=f"[{item.itype}:{tname}] ({item.position[0]:.0f},{item.position[1]:.0f})", icon="EMPTY_SINGLE_ARROW")
 
@@ -100,11 +100,11 @@ class GTA5_PT_PathingEditor(Panel):
 # ── YNV ──────────────────────────────────────────────────────────────────────
 
 def _draw_ynv(layout, context, props):
-    # Import/Export
+    # Create/Export
     box = layout.box()
-    box.label(text="Import / Export", icon="FILE_FOLDER")
+    box.label(text="Create / Export", icon="FILE_NEW")
     row = box.row(align=True)
-    row.operator("gta5_ynv.import_xml", text="Import YNV", icon="IMPORT")
+    row.operator("gta5_ynv.new_file", text="New YNV", icon="FILE_NEW")
     row.operator("gta5_ynv.export_xml", text="Export YNV", icon="EXPORT")
 
     # Stats
@@ -186,9 +186,102 @@ def _draw_ynv(layout, context, props):
     col.prop(props, "tile_size")
     col.prop(props, "offset_x")
     col.prop(props, "offset_y")
+    col.prop(props, "split_apply_decimate")
+    if props.split_apply_decimate:
+        col.prop(props, "split_decimate_auto")
+        if props.split_decimate_auto:
+            col.prop(props, "split_decimate_strength")
+        else:
+            col.prop(props, "split_decimate_ratio")
     box.operator("gta5_ynv.split_mesh", text="Split Mesh", icon="MOD_EXPLODE")
 
-    # Portals
+    # NavMesh Edit (creator workflow)
+    box = layout.box()
+    box.label(text="NavMesh Edit", icon="MESH_DATA")
+    col = box.column(align=True)
+    col.operator("gta5_ynv.create_navmesh", text="Create a Navmesh", icon="ADD")
+    col.operator("gta5_ynv.convert_to_navmesh", text="Convert to Navmesh", icon="FILE_REFRESH")
+    op = col.operator("gta5_ynv.convert_to_navmesh", text="Convert to Navmesh (mesh only)", icon="MESH_DATA")
+    op.mesh_only = True
+
+    col.separator()
+    col.label(text="New navmesh name when creating a root:")
+    row = col.row(align=True)
+    row.prop(props, "navmesh_name_prefix", text="")
+    row.prop(props, "navmesh_name_x", text="")
+    row.prop(props, "navmesh_name_y", text="")
+    row = col.row(align=True)
+    row.label(text=f"{props.navmesh_name_prefix}[{props.navmesh_name_x}][{props.navmesh_name_y}]")
+
+    col.separator()
+    row = col.row(align=True)
+    row.prop(props, "area_id_new", text="Area ID (new)")
+    row.operator("gta5_ynv.apply_area_id", text="Apply", icon="CHECKMARK")
+    row = col.row(align=True)
+    row.prop(props, "auto_start", text="Auto start")
+    row.operator("gta5_ynv.auto_area_id", text="Auto Area ID", icon="MODIFIER")
+    col.label(text="Grid cell: 150 (Y first, X second for names)")
+
+    # Nav Point (phase 2)
+    box = layout.box()
+    box.label(text="Nav Point", icon="EMPTY_SINGLE_ARROW")
+    row = box.row(align=True)
+    row.operator("gta5_ynv.add_nav_point", text="Create Nav Point", icon="ADD")
+    box.label(text="Active Nav Point (auto-sync display)")
+    if 0 <= props.nav_point_index < len(props.nav_points):
+        np = props.nav_points[props.nav_point_index]
+        row = box.row(align=True)
+        row.label(text=f"Type (current): {np.point_type}")
+        row.label(text=f"Index: {props.nav_point_index}")
+    else:
+        row = box.row(align=True)
+        row.label(text="Type (current): 0")
+        row.label(text="Index: -1")
+    row = box.row(align=True)
+    row.prop(props, "navpoint_new_type", text="New Type")
+    row = box.row(align=True)
+    row.operator("gta5_ynv.use_current_navpoint_type", text="use current as base", icon="EYEDROPPER")
+    row.operator("gta5_ynv.apply_new_navpoint_type", text="apply new data", icon="CHECKMARK")
+
+    # Nav Portal (phase 2)
+    box = layout.box()
+    box.label(text="Nav Portal", icon="OBJECT_DATA")
+    row = box.row(align=True)
+    row.operator("gta5_ynv.add_portal", text="Create a Nav Portal", icon="ADD")
+    row.operator("gta5_ynv.add_portal_links", text="Add lines", icon="MOD_ARRAY")
+    box.label(text="Select a nav portal (automatic synced data)")
+    row = box.row()
+    row.template_list("GTA5_UL_YNV_Portals", "", props, "portals", props, "portal_index", rows=3)
+    col = row.column(align=True)
+    col.operator("gta5_ynv.remove_portal", text="", icon="REMOVE")
+
+    if 0 <= props.portal_index < len(props.portals):
+        p = props.portals[props.portal_index]
+        box.label(text=f"Index: {props.portal_index}")
+        box.label(text=f"Type: {p.portal_type}")
+        box.label(text=f"From poly ID: {p.poly_from}")
+        box.label(text=f"To poly ID: {p.poly_to}")
+        box.label(text=f"From point: {p.pos_from[0]:.2f}, {p.pos_from[1]:.2f}, {p.pos_from[2]:.2f}")
+        box.label(text=f"To point: {p.pos_to[0]:.2f}, {p.pos_to[1]:.2f}, {p.pos_to[2]:.2f}")
+    else:
+        box.label(text="Index: -1")
+        box.label(text="Type: 0")
+
+    sub = box.box()
+    sub.label(text="New (editable)")
+    row = sub.row(align=True)
+    row.prop(props, "portal_new_type")
+    row.prop(props, "portal_new_angle")
+    row = sub.row(align=True)
+    row.prop(props, "portal_new_poly_from")
+    row.prop(props, "portal_new_poly_to")
+    sub.prop(props, "portal_new_pos_from")
+    sub.prop(props, "portal_new_pos_to")
+    row = sub.row(align=True)
+    row.operator("gta5_ynv.use_current_portal_data", text="use current data", icon="EYEDROPPER")
+    row.operator("gta5_ynv.apply_new_portal_data", text="apply new data", icon="CHECKMARK")
+
+    # Portals (legacy detailed editor)
     box = layout.box()
     box.label(text=f"Portals ({props.stat_portals})", icon="OBJECT_DATA")
     row = box.row()
@@ -207,7 +300,7 @@ def _draw_ynv(layout, context, props):
         sub.prop(p, "pos_from")
         sub.prop(p, "pos_to")
 
-    # Nav Points
+    # Nav Points (legacy list)
     box = layout.box()
     box.label(text=f"Nav Points ({props.stat_navpoints})", icon="EMPTY_SINGLE_ARROW")
     row = box.row()
@@ -224,15 +317,26 @@ def _draw_ynv(layout, context, props):
         sub.prop(np, "position")
     box.operator("gta5_ynv.sync_from_objects", text="Sync from Objects", icon="FILE_REFRESH")
 
+    # PartId tools
+    box = layout.box()
+    box.label(text="PartId", icon="MOD_VERTEX_WEIGHT")
+    row = box.row(align=True)
+    row.prop(props, "part_id_value", text="Part Id")
+    row.operator("gta5_ynv.apply_part_id", text="Apply PartId", icon="CHECKMARK")
+    row.operator("gta5_ynv.clear_part_id", text="Clear PartId", icon="TRASH")
+    row = box.row(align=True)
+    row.operator("gta5_ynv.select_faces_part_id", text="Select faces with PartId", icon="RESTRICT_SELECT_OFF")
+    box.label(text=f"Active Face PartId (viewer): {props.part_id_current}")
+
 
 # ── YND ──────────────────────────────────────────────────────────────────────
 
 def _draw_ynd(layout, context, props):
-    # Import/Export
+    # Create/Export
     box = layout.box()
-    box.label(text="Import / Export", icon="FILE_FOLDER")
+    box.label(text="Create / Export", icon="FILE_NEW")
     row = box.row(align=True)
-    row.operator("gta5_ynd.import_xml", text="Import YND", icon="IMPORT")
+    row.operator("gta5_ynd.new_file", text="New YND", icon="FILE_NEW")
     row.operator("gta5_ynd.export_xml", text="Export YND", icon="EXPORT")
 
     # Click-select
@@ -290,7 +394,7 @@ def _draw_ynd(layout, context, props):
 
     if 0 <= props.node_index < len(props.nodes):
         node = props.nodes[props.node_index]
-        from .properties import PED_SPECIAL_TYPES
+        from ..shared.properties import PED_SPECIAL_TYPES
         is_ped = node.flags1.special_type in PED_SPECIAL_TYPES
 
         sub = box.box()
@@ -413,11 +517,11 @@ def _draw_ynd(layout, context, props):
 # ── YMT ──────────────────────────────────────────────────────────────────────
 
 def _draw_ymt(layout, context, props):
-    # Import/Export
+    # Create/Export
     box = layout.box()
-    box.label(text="Import / Export", icon="FILE_FOLDER")
+    box.label(text="Create / Export", icon="FILE_NEW")
     row = box.row(align=True)
-    row.operator("gta5_ymt.import_xml", text="Import YMT", icon="IMPORT")
+    row.operator("gta5_ymt.new_file", text="New YMT", icon="FILE_NEW")
     row.operator("gta5_ymt.export_xml", text="Export YMT", icon="EXPORT")
 
     # Stats
@@ -502,11 +606,11 @@ def _draw_ymt(layout, context, props):
 # ── TRAINS ────────────────────────────────────────────────────────────────────
 
 def _draw_trains(layout, context, props):
-    # Import/Export
+    # Create/Export
     box = layout.box()
-    box.label(text="Import / Export", icon="FILE_FOLDER")
+    box.label(text="Create / Export", icon="FILE_NEW")
     row = box.row(align=True)
-    row.operator("gta5_trains.import_dat", text="Import DAT", icon="IMPORT")
+    row.operator("gta5_trains.new_track", text="New Track", icon="FILE_NEW")
     row.operator("gta5_trains.export_dat", text="Export DAT", icon="EXPORT")
 
     # Stats

@@ -419,6 +419,38 @@ class YNV_Props(PropertyGroup):
     tile_size:      FloatProperty(name="Tile Size", default=150.0, min=1.0)
     offset_x:       FloatProperty(name="Offset X",  default=0.0)
     offset_y:       FloatProperty(name="Offset Y",  default=0.0)
+    split_apply_decimate: BoolProperty(name="Decimate After Split", default=True)
+    split_decimate_auto: BoolProperty(name="Auto Ratio", default=True)
+    split_decimate_strength: FloatProperty(
+        name="Auto Strength",
+        default=0.65,
+        min=0.0,
+        max=1.0,
+        subtype="FACTOR",
+        description="Higher values simplify flat dense tiles more aggressively",
+    )
+    split_decimate_ratio: FloatProperty(
+        name="Decimate Ratio",
+        default=0.8,
+        min=0.1,
+        max=1.0,
+        subtype="FACTOR",
+        description="1.0 keeps full detail, lower values reduce triangles",
+    )
+    navmesh_name_prefix: StringProperty(name="Root Name", default="navmesh")
+    navmesh_name_x:      IntProperty(name="Name X", default=129)
+    navmesh_name_y:      IntProperty(name="Name Y", default=87)
+    area_id_new:         IntProperty(name="Area ID (new)", default=2450, min=0)
+    auto_start:          IntProperty(name="Auto start", default=1, min=0)
+    navpoint_new_type:   IntProperty(name="New Type", default=0, min=0, max=255)
+    portal_new_type:     IntProperty(name="Type", default=1, min=1, max=3)
+    portal_new_angle:    FloatProperty(name="Angle", default=0.0, precision=6)
+    portal_new_poly_from:IntProperty(name="From poly ID", default=0, min=0)
+    portal_new_poly_to:  IntProperty(name="To poly ID", default=0, min=0)
+    portal_new_pos_from: FloatVectorProperty(name="From point", size=3, default=(0,0,0), precision=6)
+    portal_new_pos_to:   FloatVectorProperty(name="To point", size=3, default=(0,0,0), precision=6)
+    part_id_value:       IntProperty(name="Part ID", default=1, min=0, max=255)
+    part_id_current:     IntProperty(name="Active face PartId", default=0, min=0, max=255)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
