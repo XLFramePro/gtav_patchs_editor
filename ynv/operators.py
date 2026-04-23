@@ -951,9 +951,34 @@ def _ensure_b456_for_mesh(obj):
 
 def _get_active_poly_mesh(context):
     obj = context.active_object
-    if obj is not None and obj.type == "MESH" and obj.get("ynv_type") == "poly_mesh":
+    if obj is not None and obj.type == "MESH" and (
+        obj.get("ynv_type") == "poly_mesh"
+        or (("split_tile_x" in obj) and ("split_tile_y" in obj))
+    ):
         return obj
-    return next((o for o in context.scene.objects if o.get("ynv_type") == "poly_mesh" and o.type == "MESH"), None)
+    return next(
+        (
+            o
+            for o in context.scene.objects
+            if o.type == "MESH"
+            and (
+                o.get("ynv_type") == "poly_mesh"
+                or (("split_tile_x" in o) and ("split_tile_y" in o))
+            )
+        ),
+        None,
+    )
+
+
+def _is_editable_ynv_mesh(obj):
+    return (
+        obj is not None
+        and obj.type == "MESH"
+        and (
+            obj.get("ynv_type") == "poly_mesh"
+            or (("split_tile_x" in obj) and ("split_tile_y" in obj))
+        )
+    )
 
 
 from .builders import (
@@ -1200,7 +1225,7 @@ class YNV_OT_ReadSelectedFlags(Operator):
     @classmethod
     def poll(cls, context):
         obj = context.active_object
-        return obj is not None and obj.get("ynv_type") == "poly_mesh" and obj.mode == "EDIT"
+        return _is_editable_ynv_mesh(obj) and obj.mode == "EDIT"
     def execute(self, context):
         props = context.scene.gta5_pathing.ynv
         ok, msg = _read_selected_face_flags(context, props)
@@ -1215,7 +1240,7 @@ class YNV_OT_ApplyFlagsPreset(Operator):
     @classmethod
     def poll(cls, context):
         obj = context.active_object
-        return obj is not None and obj.get("ynv_type") == "poly_mesh" and obj.mode == "EDIT"
+        return _is_editable_ynv_mesh(obj) and obj.mode == "EDIT"
     def execute(self, context):
         props  = context.scene.gta5_pathing.ynv
         preset = props.flag_preset
@@ -1230,7 +1255,7 @@ class YNV_OT_ApplyCustomFlags(Operator):
     @classmethod
     def poll(cls, context):
         obj = context.active_object
-        return obj is not None and obj.get("ynv_type") == "poly_mesh" and obj.mode == "EDIT"
+        return _is_editable_ynv_mesh(obj) and obj.mode == "EDIT"
     def execute(self, context):
         props = context.scene.gta5_pathing.ynv
         pf    = props.selected_poly_flags
@@ -1474,7 +1499,7 @@ class YNV_OT_AddPortalLinks(Operator):
         props = context.scene.gta5_pathing.ynv
         obj = context.active_object
         return (
-            obj is not None and obj.type == "MESH" and obj.get("ynv_type") == "poly_mesh"
+            _is_editable_ynv_mesh(obj)
             and obj.mode == "EDIT" and 0 <= props.portal_index < len(props.portals)
         )
 
@@ -1515,7 +1540,7 @@ class YNV_OT_SelectFacesByPartId(Operator):
     @classmethod
     def poll(cls, context):
         obj = context.active_object
-        return obj is not None and obj.type == "MESH" and obj.get("ynv_type") == "poly_mesh" and obj.mode == "EDIT"
+        return _is_editable_ynv_mesh(obj) and obj.mode == "EDIT"
 
     def execute(self, context):
         props = context.scene.gta5_pathing.ynv
@@ -1545,7 +1570,7 @@ class YNV_OT_ApplyPartId(Operator):
     @classmethod
     def poll(cls, context):
         obj = context.active_object
-        return obj is not None and obj.type == "MESH" and obj.get("ynv_type") == "poly_mesh" and obj.mode == "EDIT"
+        return _is_editable_ynv_mesh(obj) and obj.mode == "EDIT"
 
     def execute(self, context):
         props = context.scene.gta5_pathing.ynv
@@ -1578,7 +1603,7 @@ class YNV_OT_ClearPartId(Operator):
     @classmethod
     def poll(cls, context):
         obj = context.active_object
-        return obj is not None and obj.type == "MESH" and obj.get("ynv_type") == "poly_mesh" and obj.mode == "EDIT"
+        return _is_editable_ynv_mesh(obj) and obj.mode == "EDIT"
 
     def execute(self, context):
         props = context.scene.gta5_pathing.ynv
@@ -1819,6 +1844,8 @@ class YNV_OT_SplitMesh(Operator):
 
             for tile_obj in created_objects:
                 ratio = decimate_ratio
+                flatness = 0.0
+                target_tri_count = None
                 if auto_decimate:
                     mesh = tile_obj.data
                     mesh.calc_loop_triangles()
@@ -1826,24 +1853,60 @@ class YNV_OT_SplitMesh(Operator):
                     z_values = [v.co.z for v in mesh.vertices]
                     z_range = (max(z_values) - min(z_values)) if z_values else 0.0
 
-                    # Auto rule: simplify mostly flat + dense tiles, preserve rough terrain more.
-                    density_norm = min(1.0, tri_count / 700.0)
-                    relief_norm = min(1.0, z_range / max(1.0, tile_size * 0.18))
+                    # Terrain-aware auto rule with a hard triangle budget per tile.
+                    density_norm = min(1.0, tri_count / 260.0)
+                    relief_norm = min(1.0, z_range / max(1.0, tile_size * 0.08))
                     flatness = 1.0 - relief_norm
-                    aggressiveness = density_norm * (0.35 + (0.65 * flatness))
-                    ratio = 1.0 - (decimate_strength * aggressiveness)
-                    ratio = max(0.22, min(0.95, ratio))
+                    detail_mix = (0.20 + (0.80 * relief_norm))
+                    base_target = 28 + int((150 * detail_mix) + (90 * (1.0 - decimate_strength)))
+                    density_bonus = int(120 * density_norm * (0.35 + (0.65 * relief_norm)))
+                    target_tri_count = max(18, base_target + density_bonus)
+                    ratio = target_tri_count / max(1, tri_count)
+                    ratio = max(0.015, min(0.55, ratio))
                 if ratio >= 0.999:
                     continue
+
+                context.view_layer.objects.active = tile_obj
+                tile_obj.select_set(True)
 
                 mod = tile_obj.modifiers.new(name="SplitDecimate", type="DECIMATE")
                 mod.decimate_type = "COLLAPSE"
                 mod.ratio = ratio
                 mod.use_collapse_triangulate = True
-                context.view_layer.objects.active = tile_obj
-                tile_obj.select_set(True)
                 try:
                     bpy.ops.object.modifier_apply(modifier=mod.name)
+
+                    if auto_decimate:
+                        mesh = tile_obj.data
+                        mesh.calc_loop_triangles()
+                        if target_tri_count is not None and len(mesh.loop_triangles) > int(target_tri_count * 1.35):
+                            second_ratio = target_tri_count / max(1, len(mesh.loop_triangles))
+                            second_ratio = max(0.01, min(0.45, second_ratio))
+                            mod2 = tile_obj.modifiers.new(name="SplitDecimateFinal", type="DECIMATE")
+                            mod2.decimate_type = "COLLAPSE"
+                            mod2.ratio = second_ratio
+                            mod2.use_collapse_triangulate = True
+                            bpy.ops.object.modifier_apply(modifier=mod2.name)
+
+                        mesh = tile_obj.data
+                        bm = bmesh.new()
+                        bm.from_mesh(mesh)
+                        angle_limit = math.radians(8.0 + (18.0 * decimate_strength * flatness))
+                        try:
+                            bmesh.ops.dissolve_limit(
+                                bm,
+                                angle_limit=angle_limit,
+                                verts=bm.verts,
+                                edges=bm.edges,
+                                delimit={"UV", "MATERIAL", "SEAM", "SHARP"},
+                            )
+                        except Exception:
+                            pass
+                        bmesh.ops.triangulate(bm, faces=bm.faces[:])
+                        bm.to_mesh(mesh)
+                        bm.free()
+                        mesh.update()
+
                     decimated_count += 1
                 except Exception:
                     try:

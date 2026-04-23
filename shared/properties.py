@@ -423,7 +423,7 @@ class YNV_Props(PropertyGroup):
     split_decimate_auto: BoolProperty(name="Auto Ratio", default=True)
     split_decimate_strength: FloatProperty(
         name="Auto Strength",
-        default=0.65,
+        default=0.82,
         min=0.0,
         max=1.0,
         subtype="FACTOR",

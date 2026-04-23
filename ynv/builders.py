@@ -450,10 +450,18 @@ def _refresh_navpoints_objects(props):
     _build_navpoints_objs(props, col)
 
 
+def _is_flag_target_mesh(obj):
+    if obj is None or obj.type != "MESH":
+        return False
+    if obj.get("ynv_type") == "poly_mesh":
+        return True
+    return ("split_tile_x" in obj) and ("split_tile_y" in obj)
+
+
 def _read_selected_face_flags(context, props):
     obj = context.active_object
-    if obj is None or obj.type != "MESH" or obj.get("ynv_type") != "poly_mesh":
-        return False, "Activate the YNV PolyMesh in Edit Mode."
+    if not _is_flag_target_mesh(obj):
+        return False, "Activate a YNV mesh/tile in Edit Mode."
     if obj.mode != "EDIT":
         return False, "Switch to Edit Mode and select a face."
 
@@ -526,9 +534,16 @@ def _ensure_b456_for_mesh(obj):
 
 def _get_active_poly_mesh(context):
     obj = context.active_object
-    if obj is not None and obj.type == "MESH" and obj.get("ynv_type") == "poly_mesh":
+    if _is_flag_target_mesh(obj):
         return obj
-    return next((o for o in context.scene.objects if o.get("ynv_type") == "poly_mesh" and o.type == "MESH"), None)
+    return next(
+        (
+            o
+            for o in context.scene.objects
+            if o.type == "MESH" and _is_flag_target_mesh(o)
+        ),
+        None,
+    )
 
 
 def _apply_flags_to_selection(context, props, b0, b1, b2, b3, label):
