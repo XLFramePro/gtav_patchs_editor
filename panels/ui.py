@@ -12,9 +12,17 @@ def update_ynv_flags():
     try:
         if bpy.context.scene.gta5_pathing.active_module == "YNV":
             props = bpy.context.scene.gta5_pathing.ynv
-            if (bpy.context.active_object and
-                bpy.context.active_object.get("ynv_type") == "poly_mesh" and
-                bpy.context.active_object.mode == "EDIT"):
+            obj = bpy.context.active_object
+            if (
+                props.auto_sync_flags
+                and obj is not None
+                and obj.type == "MESH"
+                and (
+                    obj.get("ynv_type") == "poly_mesh"
+                    or (("split_tile_x" in obj) and ("split_tile_y" in obj))
+                )
+                and obj.mode == "EDIT"
+            ):
                 _read_selected_face_flags(bpy.context, props)
     except Exception:
         pass  # Ignore errors in timer
@@ -132,56 +140,50 @@ def _draw_ynv(layout, context, props):
     col.prop(props, "show_portals", text="Portals")
     col.prop(props, "show_navpoints", text="Nav Points")
 
-    # Polygon Flags Editor
+    # Flags
     box = layout.box()
-    box.label(text="Polygon Flags", icon="TOOL_SETTINGS")
+    box.label(text="Flags", icon="TOOL_SETTINGS")
     row = box.row(align=True)
     row.prop(props, "flag_preset", text="")
+    row.operator("gta5_ynv.read_selected_flags", text="Lire depuis face active", icon="EYEDROPPER")
+    row.operator("gta5_ynv.apply_custom_flags", text="Appliquer sur sélection", icon="CHECKMARK")
+
+    row = box.row(align=True)
     row.operator("gta5_ynv.apply_flags_preset", text="Apply Preset", icon="CHECKMARK")
     row.operator("gta5_ynv.add_polygon", text="Add Polygon", icon="ADD")
+    row.prop(props, "auto_sync_flags", text="Auto Sync", toggle=True)
 
-    # Custom Flags
     sub = box.box()
-    sub.label(text="Custom Flags (Edit Mode)", icon="EDITMODE_HLT")
-    row = sub.row(align=True)
-    row.operator("gta5_ynv.read_selected_flags", text="Read Selection", icon="EYEDROPPER")
-    row.operator("gta5_ynv.apply_custom_flags", text="Apply Custom", icon="CHECKMARK")
-
     pf = props.selected_poly_flags
-    # Flags sections
-    flags_box = sub.box()
-    flags_box.label(text="Surface (Byte 0)", icon="MESH_DATA")
-    grid = flags_box.grid_flow(row_major=True, columns=2, even_columns=True, even_rows=True, align=True)
+    cols = sub.row(align=True)
+
+    c1 = cols.column(align=True)
+    c1.label(text="Flags1 (Blue)")
     for attr in ["small_poly", "large_poly", "is_pavement", "is_underground", "unused_f1_4", "unused_f1_5", "is_too_steep", "is_water"]:
-        grid.prop(pf, attr)
+        c1.prop(pf, attr)
 
-    flags_box = sub.box()
-    flags_box.label(text="Audio/Props (Byte 1)", icon="SPEAKER")
-    grid = flags_box.grid_flow(row_major=True, columns=2, even_columns=True, even_rows=True, align=True)
+    c2 = cols.column(align=True)
+    c2.label(text="Flags2 (Alpha)")
     for attr in ["audio_prop1", "audio_prop2", "audio_prop3", "unused_f2_3", "near_car_node", "is_interior", "is_isolated", "unused_f2_7"]:
-        grid.prop(pf, attr)
+        c2.prop(pf, attr)
 
-    flags_box = sub.box()
-    flags_box.label(text="Behavior (Byte 2)", icon="PHYSICS")
-    grid = flags_box.grid_flow(row_major=True, columns=2, even_columns=True, even_rows=True, align=True)
+    c3 = cols.column(align=True)
+    c3.label(text="Flags3 (Green)")
     for attr in ["can_spawn", "is_road", "along_edge", "is_train_track", "is_shallow", "ped_density1", "ped_density2", "ped_density3"]:
-        grid.prop(pf, attr)
+        c3.prop(pf, attr)
 
-    flags_box = sub.box()
-    flags_box.label(text="Cover (Byte 3)", icon="MOD_BUILD")
-    grid = flags_box.grid_flow(row_major=True, columns=2, even_columns=True, even_rows=True, align=True)
+    c4 = cols.column(align=True)
+    c4.label(text="Flags4 (Red)")
     for attr in ["cover_south", "cover_south2", "cover_east", "cover_north", "cover_north2", "cover_north3", "cover_west", "cover_south3"]:
-        grid.prop(pf, attr)
+        c4.prop(pf, attr)
 
-    flags_box = sub.box()
-    flags_box.label(text="Internal (Bytes 4-5)", icon="SETTINGS")
-    row = flags_box.row(align=True)
+    row = sub.row(align=True)
     row.prop(pf, "byte4")
     row.prop(pf, "byte5")
 
-    # Mesh Cutter (placeholder)
+    # Mesh Cutter
     box = layout.box()
-    box.label(text="Mesh Tools", icon="MOD_DECIM")
+    box.label(text="Mesh Cutter", icon="MOD_DECIM")
     col = box.column(align=True)
     col.prop(props, "tile_size")
     col.prop(props, "offset_x")

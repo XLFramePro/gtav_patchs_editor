@@ -413,6 +413,7 @@ class YNV_Props(PropertyGroup):
     show_polygons:  BoolProperty(name="Polygons",  default=True)
     show_portals:   BoolProperty(name="Portals",   default=True)
     show_navpoints: BoolProperty(name="Nav Points", default=True)
+    auto_sync_flags: BoolProperty(name="Auto Sync Flags", default=True)
     stat_polygons:  IntProperty(default=0)
     stat_portals:   IntProperty(default=0)
     stat_navpoints: IntProperty(default=0)
